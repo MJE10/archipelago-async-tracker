@@ -5,6 +5,7 @@ from collections.abc import Callable
 from CommonClient import CommonContext, gui_enabled, get_base_parser, server_loop, ClientCommandProcessor, handle_url_arg
 import os
 import time
+import json
 import sys
 from typing import Union, Any, TYPE_CHECKING
 
@@ -101,8 +102,12 @@ class TrackerGameContext(CommonContext):
 
     def updateTracker(self) -> CurrentTrackerState:
         if self.disconnected_intentionally: return CurrentTrackerState.init_empty_state()
-        self.tracker_core.set_missing_locations([211898368]) # todo
+        self.tracker_core.set_missing_locations([]) # todo
+        with open("/app/Archipelago/Players/data/missing_checks.json", "r") as f:
+            self.tracker_core.set_missing_locations(json.loads(f.read()))
         self.tracker_core.set_items_received([]) # todo
+        with open("/app/Archipelago/Players/data/items_received.json", "r") as f:
+            self.tracker_core.set_items_received(json.loads(f.read()))
         self.tracker_core.player_id = 1
         self.tracker_core.set_hints({})
         try:

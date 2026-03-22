@@ -19,6 +19,20 @@ r = redis.Redis(
 
 REDIS_PREFIX = "ap"
 
+PROPS_DEFAULTS = {}
+
+def register_prop_defaults(props):
+    global PROPS_DEFAULTS
+    PROPS_DEFAULTS = props
+
+def game_prop(game, prop):
+    if prop in game:
+        return game[prop]
+    elif prop in PROPS_DEFAULTS:
+        return PROPS_DEFAULTS[prop]
+    else:
+        return None
+
 def api_path(game):
     return game["link"].split("/room/")[0]
 
@@ -56,7 +70,7 @@ def get_api_cached(game, route, key, per_game=True, cache_timeout=None):
 
     redis_value = r.get(redis_key)
     if redis_value is not None:
-        print(f"CACHED {redis_key}")
+        print(f"CACHED {uri}")
         return json.loads(str(redis_value))
 
     print(f"GET {uri}")
@@ -72,7 +86,7 @@ def static_tracker(game):
     return get_api_cached(game, f'/static_tracker/{tracker_id(game)}', "static_tracker")
 
 def fetch_tracker(game):
-    return get_api_cached(game, f'/tracker/{tracker_id(game)}', "tracker", cache_timeout=900000)
+    return get_api_cached(game, f'/tracker/{tracker_id(game)}', "tracker", cache_timeout=game_prop(game, "tracker_refresh"))
 
 def tracker_info_unchanged(game):
     return r.get(redis_key_for(game, "tracker")) is not None
