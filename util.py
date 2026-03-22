@@ -6,6 +6,7 @@ import redis
 import tempfile
 from logic_tracker.run_logic import get_logic_items
 from pathlib import Path
+import hashlib
 import shutil
 
 IDX_ITEM_ITEM = 0
@@ -101,30 +102,67 @@ def datapackage(game, index):
     return get_api_cached(game, f"/datapackage/{checksum}", f"datapackage:{checksum}", per_game=False)
 
 def calculate_trackers(game, interesting_players):
-    # Determine things that are in logic
     in_logic = {}
     for player_name in interesting_players:
-        in_logic[player_name] = []
-        # Do we have YAMLs?
+        player_data = interesting_players[player_name]
+        
+        # 1. Prepare data for hashing
+        game_link = game.get("link", "")
+        items_received = sorted(player_data.get("items", []))
+        
+        # Calculate missing checks (needed for the hash)
+        datapack = datapackage(game, player_data["index"])["location_name_to_id"]
+        missing_checks = sorted([
+            datapack[k] for k in datapack.keys() 
+            if k not in player_data.get("checks_done", [])
+        ])
+
+        # 2. Create a unique hash for this specific state
+        # Sorting lists ensures the hash is consistent regardless of item order
+        hash_payload = {
+            "link": game_link,
+            "player": player_name,
+            "items": items_received,
+            "missing": missing_checks
+        }
+        state_hash = hashlib.sha256(json.dumps(hash_payload, sort_keys=True).encode()).hexdigest()
+        redis_key = f"tracker:{state_hash}"
+
+        # 3. Check Redis cache
+        cached_logic = r.get(redis_key)
+        if cached_logic:
+            print(f"CACHE HIT for {player_name} (key: {redis_key})")
+            in_logic[player_name] = json.loads(cached_logic)
+            continue
+
+        # 4. Cache Miss: Run the expensive logic calculation
         path = Path(os.path.join("games", game["name"]))
         if not os.path.exists(path):
+            in_logic[player_name] = []
             continue
-        print(f"Generating logic for {game["name"]}/{player_name}")
-        # Set up temporary directory for YAMLs
+
+        print(f"CACHE MISS: Generating logic for {game['name']}/{player_name}")
         with tempfile.TemporaryDirectory() as tmpdirname:
-            # Copy all .yaml files from games/name folder into the temporary directory
             dest_dir = Path(tmpdirname)
             for yaml_file in path.glob('*.yaml'):
                 shutil.copy(yaml_file, dest_dir)
-            # Output all items received
+            
             data_dir = dest_dir.joinpath("data")
             os.mkdir(data_dir)
+            
+            # Save items
             with open(data_dir.joinpath("items_received.json"), "w") as f:
-                f.write(json.dumps(interesting_players[player_name]["items"]))
-            # Output all checks done
+                f.write(json.dumps(player_data["items"]))
+            
+            # Save missing checks
             with open(data_dir.joinpath("missing_checks.json"), "w") as f:
-                datapack = datapackage(game, interesting_players[player_name]["index"])["location_name_to_id"]
-                incomplete_checks = [datapack[k] for k in datapack.keys() if k not in interesting_players[player_name]["checks_done"]]
-                f.write(json.dumps(incomplete_checks))
-            in_logic[player_name] = get_logic_items(tmpdirname, player_name)
+                f.write(json.dumps(missing_checks))
+
+            # Run logic engine
+            result = get_logic_items(tmpdirname, player_name)
+            in_logic[player_name] = result
+
+            # 5. Store result in Redis for 24 hours (86,400 seconds)
+            r.set(redis_key, json.dumps(result), ex=86400)
+
     return in_logic
