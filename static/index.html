@@ -1,1 +1,186 @@
-hello
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logic Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { background-color: #121212; color: #e5e7eb; font-family: 'Inter', sans-serif; }
+        .card { background-color: #1e1e1e; border: 1px solid #333; transition: transform 0.1s; }
+        .collapse-content { display: block; overflow: hidden; }
+        .collapsed .collapse-content { display: none; }
+        .rotate-icon { transition: transform 0.2s; transform: rotate(0deg); }
+        .collapsed .rotate-icon { transform: rotate(-90deg); }
+        .btn { transition: all 0.2s; cursor: pointer; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .location-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 0.5rem; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-6xl mx-auto">
+        <div class="flex flex-col md:flex-row justify-between items-center mb-8 gap-6 bg-[#1e1e1e] p-6 rounded-lg border border-gray-800 shadow-2xl">
+            <div>
+                <h1 class="text-3xl font-bold tracking-tight bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">Logic Tracker</h1>
+                <p id="status-text" class="text-xs text-gray-500 mt-1 uppercase tracking-widest">Initializing...</p>
+            </div>
+            <div class="flex flex-wrap justify-center gap-3">
+                <button onclick="globalAction('refresh')" class="btn bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-md text-sm font-semibold shadow-lg">Refresh All Trackers</button>
+                <button onclick="globalAction('super')" class="btn bg-purple-600 hover:bg-purple-500 px-4 py-2 rounded-md text-sm font-semibold shadow-lg">Super Refresh All</button>
+            </div>
+        </div>
+
+        <div id="game-container" class="space-y-6">
+            <div class="flex justify-center p-12">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const STORAGE_PREFIX = "logic_v1_";
+        const STATUS_EL = document.getElementById('status-text');
+        let CURRENT_DATA = {};
+
+        /**
+         * API Interaction
+         */
+        async function triggerAction(type, gameName) {
+            const encodedName = encodeURIComponent(gameName);
+            const endpoint = type === 'super' ? `/super_refresh/${encodedName}` : `/refresh_tracker/${encodedName}`;
+            
+            updateStatus(`Queuing ${type} for ${gameName}...`, "text-yellow-500");
+            try {
+                const response = await fetch(endpoint);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                updateStatus(`Queued: ${gameName}`, "text-green-500");
+            } catch (err) {
+                console.error(err);
+                updateStatus(`Failed to queue ${gameName}`, "text-red-500");
+            }
+        }
+
+        async function globalAction(type) {
+            const games = Object.keys(CURRENT_DATA);
+            if (games.length === 0) return;
+            
+            updateStatus(`Batching ${type} for all games...`, "text-blue-400");
+            for (const name of games) {
+                await triggerAction(type, name);
+            }
+        }
+
+        async function fetchData() {
+            try {
+                const response = await fetch('/games');
+                const data = await response.json();
+                CURRENT_DATA = data;
+                render(data);
+                updateStatus(`Last Updated: ${new Date().toLocaleTimeString()}`);
+            } catch (err) {
+                console.error(err);
+                updateStatus("Connection Error", "text-red-500");
+            }
+        }
+
+        /**
+         * UI State Management
+         */
+        function updateStatus(msg, colorClass = "text-gray-500") {
+            STATUS_EL.textContent = msg;
+            STATUS_EL.className = `text-xs mt-1 uppercase tracking-widest ${colorClass}`;
+        }
+
+        function toggleCollapse(id) {
+            const element = document.getElementById(id);
+            const isCollapsed = element.classList.toggle('collapsed');
+            localStorage.setItem(STORAGE_PREFIX + id, isCollapsed);
+        }
+
+        function isCollapsed(id) {
+            // Default to true (collapsed) if it's the first time seeing this ID
+            const stored = localStorage.getItem(STORAGE_PREFIX + id);
+            return stored === null ? false : stored === 'true';
+        }
+
+        /**
+         * Rendering Logic
+         */
+        function render(data) {
+            const container = document.getElementById('game-container');
+            container.innerHTML = "";
+
+            if (Object.keys(data).length === 0) {
+                container.innerHTML = `<div class="text-center py-20 text-gray-600 italic">No active games found in logic.</div>`;
+                return;
+            }
+
+            for (const [gameName, gameData] of Object.entries(data)) {
+                // Create a safe ID for the DOM
+                const gameId = `g_${btoa(gameName).replace(/[^a-z0-9]/gi, '')}`;
+                const gameCollapsed = isCollapsed(gameId);
+
+                const gameSection = document.createElement('div');
+                gameSection.id = gameId;
+                gameSection.className = `card rounded-xl shadow-lg overflow-hidden ${gameCollapsed ? 'collapsed' : ''}`;
+
+                gameSection.innerHTML = `
+                    <div class="flex flex-wrap items-center justify-between p-4 bg-[#252525] border-b border-gray-800">
+                        <div class="flex items-center cursor-pointer flex-grow min-w-[200px]" onclick="toggleCollapse('${gameId}')">
+                            <svg class="rotate-icon w-6 h-6 mr-3 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                            <h2 class="text-xl font-bold text-white">${gameName}</h2>
+                        </div>
+                        <div class="flex gap-2 mt-2 md:mt-0">
+                            <button onclick="triggerAction('refresh', '${gameName.replace(/'/g, "\\'")}')" class="btn text-xs bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded font-medium">Refresh Tracker</button>
+                            <button onclick="triggerAction('super', '${gameName.replace(/'/g, "\\'")}')" class="btn text-xs bg-red-900/40 hover:bg-red-900/60 text-red-200 px-3 py-1.5 rounded font-medium border border-red-800/50">Super Refresh</button>
+                        </div>
+                    </div>
+                    <div class="collapse-content p-4 space-y-4 bg-[#1a1a1a]">
+                        ${renderPlayers(gameName, gameData.in_logic)}
+                    </div>
+                `;
+                container.appendChild(gameSection);
+            }
+        }
+
+        function renderPlayers(gameName, players) {
+            return Object.entries(players).map(([playerName, locations]) => {
+                const playerId = `p_${btoa(gameName + playerName).replace(/[^a-z0-9]/gi, '')}`;
+                const playerCollapsed = isCollapsed(playerId);
+
+                return `
+                    <div class="border border-gray-800 rounded-lg overflow-hidden shadow-sm ${playerCollapsed ? 'collapsed' : ''}" id="${playerId}">
+                        <div class="flex items-center p-3 bg-gray-800/30 hover:bg-gray-800/50 cursor-pointer transition-colors" onclick="toggleCollapse('${playerId}')">
+                            <svg class="rotate-icon w-4 h-4 mr-2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                            <span class="font-semibold text-gray-200">${playerName}</span>
+                            <span class="ml-auto text-[10px] font-bold tracking-tighter bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded uppercase">
+                                ${locations.length} In Logic
+                            </span>
+                        </div>
+                        <div class="collapse-content bg-black/20">
+                            <div class="p-4 location-grid">
+                                ${locations.length > 0 
+                                    ? locations.map(loc => `
+                                        <div class="flex items-start text-sm text-gray-400 group">
+                                            <span class="w-1.5 h-1.5 mt-1.5 bg-green-500/60 rounded-full mr-2 group-hover:bg-green-400 shrink-0"></span>
+                                            <span class="leading-tight group-hover:text-gray-200">${loc}</span>
+                                        </div>`).join('')
+                                    : '<div class="text-gray-600 text-xs italic">No locations currently reachable.</div>'
+                                }
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        /**
+         * Init
+         */
+        fetchData();
+        setInterval(fetchData, 60000); // Poll once a minute
+    </script>
+</body>
+</html>

@@ -101,24 +101,42 @@ def datapackage(game, index):
     checksum = static_tracker(game)["datapackage"][game_name]["checksum"]
     return get_api_cached(game, f"/datapackage/{checksum}", f"datapackage:{checksum}", per_game=False)
 
+def clear_tracker_cache(game):
+    """Deletes the cached tracker JSON to force a refresh of items/checks."""
+    key = redis_key_for(game, "tracker")
+    r.delete(key)
+    print(f"Cleared tracker cache for room: {room_id(game)}")
+
+def clear_game_cache(game):
+    """Deletes all cached information associated with a specific room ID."""
+    rid = room_id(game)
+    # Clear general API cache (prefixed with ap:room_id)
+    api_keys = list(r.scan_iter(f"{REDIS_PREFIX}:{rid}:*"))
+    # Clear logic tracker cache (prefixed with tracker:room_id)
+    logic_keys = list(r.scan_iter(f"tracker:{rid}:*"))
+    
+    all_keys = api_keys + logic_keys
+    if all_keys:
+        r.delete(*all_keys)
+        print(f"Wiped {len(all_keys)} keys for game {rid}")
+
 def calculate_trackers(game, interesting_players):
     in_logic = {}
+    rid = room_id(game)
+
     for player_name in interesting_players:
         player_data = interesting_players[player_name]
         
-        # 1. Prepare data for hashing
+        # 1. Prepare data and generate hash
         game_link = game.get("link", "")
         items_received = sorted(player_data.get("items", []))
         
-        # Calculate missing checks (needed for the hash)
         datapack = datapackage(game, player_data["index"])["location_name_to_id"]
         missing_checks = sorted([
             datapack[k] for k in datapack.keys() 
             if k not in player_data.get("checks_done", [])
         ])
 
-        # 2. Create a unique hash for this specific state
-        # Sorting lists ensures the hash is consistent regardless of item order
         hash_payload = {
             "link": game_link,
             "player": player_name,
@@ -126,22 +144,31 @@ def calculate_trackers(game, interesting_players):
             "missing": missing_checks
         }
         state_hash = hashlib.sha256(json.dumps(hash_payload, sort_keys=True).encode()).hexdigest()
-        redis_key = f"tracker:{state_hash}"
+        
+        # 2. Hierarchical key for targeted deletion
+        # Format: tracker:ROOM_ID:PLAYER_NAME:HASH
+        new_redis_key = f"tracker:{rid}:{player_name}:{state_hash}"
 
-        # 3. Check Redis cache
-        cached_logic = r.get(redis_key)
+        # 3. Check if this exact state is already cached
+        cached_logic = r.get(new_redis_key)
         if cached_logic:
-            print(f"CACHE HIT for {player_name} (key: {redis_key})")
+            print(f"CACHED logic for {game["name"]}/{player_name}")
             in_logic[player_name] = json.loads(cached_logic)
             continue
 
-        # 4. Cache Miss: Run the expensive logic calculation
+        # 4. Cache Miss: First, remove any OLD logic hashes for THIS player
+        # Since logic only moves forward, we don't need the old calculations
+        old_player_keys = list(r.scan_iter(f"tracker:{rid}:{player_name}:*"))
+        if old_player_keys:
+            r.delete(*old_player_keys)
+
+        # 5. Calculate logic (Expensive operation)
         path = Path(os.path.join("games", game["name"]))
         if not os.path.exists(path):
             in_logic[player_name] = []
             continue
 
-        print(f"CACHE MISS: Generating logic for {game['name']}/{player_name}")
+        print(f"Generating new logic for {player_name}...")
         with tempfile.TemporaryDirectory() as tmpdirname:
             dest_dir = Path(tmpdirname)
             for yaml_file in path.glob('*.yaml'):
@@ -150,19 +177,16 @@ def calculate_trackers(game, interesting_players):
             data_dir = dest_dir.joinpath("data")
             os.mkdir(data_dir)
             
-            # Save items
             with open(data_dir.joinpath("items_received.json"), "w") as f:
                 f.write(json.dumps(player_data["items"]))
             
-            # Save missing checks
             with open(data_dir.joinpath("missing_checks.json"), "w") as f:
                 f.write(json.dumps(missing_checks))
 
-            # Run logic engine
             result = get_logic_items(tmpdirname, player_name)
             in_logic[player_name] = result
 
-            # 5. Store result in Redis for 24 hours (86,400 seconds)
-            r.set(redis_key, json.dumps(result), ex=86400)
+            # 6. Store in Redis for 24 hours
+            r.set(new_redis_key, json.dumps(result), ex=86400)
 
     return in_logic

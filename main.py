@@ -6,6 +6,8 @@ from flask import Flask, jsonify, send_from_directory
 app = Flask(__name__, static_folder='static')
 
 ALL_GAME_RESULTS = {}
+REFRESH_TRACKERS = []
+SUPER_REFRESH = []
 
 @app.route('/')
 def index():
@@ -23,6 +25,38 @@ def get_games():
     """Returns the current state of ALL_GAME_RESULTS as JSON."""
     return jsonify(ALL_GAME_RESULTS)
 
+@app.route('/refresh_tracker/<path:game_name>')
+def trigger_refresh_tracker(game_name):
+    """Adds a game to the queue to have its tracker JSON refreshed."""
+    global REFRESH_TRACKERS
+    if game_name not in REFRESH_TRACKERS:
+        REFRESH_TRACKERS.append(game_name)
+    
+    update_all_games()
+    
+    return jsonify({
+        "status": "queued",
+        "action": "refresh_tracker",
+        "game": game_name,
+        "current_queue_size": len(REFRESH_TRACKERS)
+    })
+
+@app.route('/super_refresh/<path:game_name>')
+def trigger_super_refresh(game_name):
+    """Adds a game to the queue to have ALL cached data wiped."""
+    global SUPER_REFRESH
+    if game_name not in SUPER_REFRESH:
+        SUPER_REFRESH.append(game_name)
+    
+    update_all_games()
+    
+    return jsonify({
+        "status": "queued",
+        "action": "super_refresh",
+        "game": game_name,
+        "current_queue_size": len(SUPER_REFRESH)
+    })
+
 def background_update_loop():
     """Runs the infinite loop in a separate thread."""
     while True:
@@ -33,10 +67,10 @@ def background_update_loop():
         time.sleep(30)
 
 def update_all_games():
-    global ALL_GAME_RESULTS
+    global ALL_GAME_RESULTS, REFRESH_TRACKERS, SUPER_REFRESH
     with open("games.yaml", 'r') as f:
         games = yaml.load(f, Loader=yaml.SafeLoader)
-        print(json.dumps(games, indent=4))
+        # print(json.dumps(games, indent=4))
 
     memory = {}
     if os.path.exists("memory.json"):
@@ -54,6 +88,10 @@ def update_all_games():
             register_prop_defaults(game)
             continue
         game["name"] = name
+        if game["name"] in REFRESH_TRACKERS:
+            clear_tracker_cache(game)
+        if game["name"] in SUPER_REFRESH:
+            clear_game_cache(game)
         # if the tracker has not changed, then we don't need to continue
         # if tracker_info_unchanged(game):
         #     continue
@@ -70,6 +108,8 @@ def update_all_games():
                 }
         all_results[name] = process_game(name, game, memory[name])
     ALL_GAME_RESULTS = all_results
+    REFRESH_TRACKERS = []
+    SUPER_REFRESH = []
     
     # if any_updated:
     #     with open("memory.json", "w") as f:
