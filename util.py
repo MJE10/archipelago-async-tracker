@@ -3,6 +3,10 @@ import os
 import json
 import time
 import redis
+import tempfile
+from logic_tracker.run_logic import get_logic_items
+from pathlib import Path
+import shutil
 
 IDX_ITEM_ITEM = 0
 IDX_ITEM_LOCATION = 1
@@ -95,3 +99,32 @@ def datapackage(game, index):
     game_name = room_status(game)["players"][index][1]
     checksum = static_tracker(game)["datapackage"][game_name]["checksum"]
     return get_api_cached(game, f"/datapackage/{checksum}", f"datapackage:{checksum}", per_game=False)
+
+def calculate_trackers(game, interesting_players):
+    # Determine things that are in logic
+    in_logic = {}
+    for player_name in interesting_players:
+        in_logic[player_name] = []
+        # Do we have YAMLs?
+        path = Path(os.path.join("games", game["name"]))
+        if not os.path.exists(path):
+            continue
+        print(f"Generating logic for {game["name"]}/{player_name}")
+        # Set up temporary directory for YAMLs
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            # Copy all .yaml files from games/name folder into the temporary directory
+            dest_dir = Path(tmpdirname)
+            for yaml_file in path.glob('*.yaml'):
+                shutil.copy(yaml_file, dest_dir)
+            # Output all items received
+            data_dir = dest_dir.joinpath("data")
+            os.mkdir(data_dir)
+            with open(data_dir.joinpath("items_received.json"), "w") as f:
+                f.write(json.dumps(interesting_players[player_name]["items"]))
+            # Output all checks done
+            with open(data_dir.joinpath("missing_checks.json"), "w") as f:
+                datapack = datapackage(game, interesting_players[player_name]["index"])["location_name_to_id"]
+                incomplete_checks = [datapack[k] for k in datapack.keys() if k not in interesting_players[player_name]["checks_done"]]
+                f.write(json.dumps(incomplete_checks))
+            in_logic[player_name] = get_logic_items(tmpdirname, player_name)
+    return in_logic
