@@ -134,7 +134,7 @@ def calculate_trackers(game, interesting_players):
         datapack = datapackage(game, player_data["index"])["location_name_to_id"]
         missing_checks = sorted([
             datapack[k] for k in datapack.keys() 
-            if k not in player_data.get("checks_done", [])
+            if datapack[k] not in player_data.get("checks_done", [])
         ])
 
         hash_payload = {

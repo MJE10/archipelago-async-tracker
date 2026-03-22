@@ -107,7 +107,10 @@ class TrackerGameContext(CommonContext):
             self.tracker_core.set_missing_locations(json.loads(f.read()))
         self.tracker_core.set_items_received([]) # todo
         with open("/app/Archipelago/Players/data/items_received.json", "r") as f:
-            self.tracker_core.set_items_received(json.loads(f.read()))
+            items = []
+            for i in json.loads(f.read()):
+                items.append(NetworkItem(*i))
+            self.tracker_core.set_items_received(items)
         self.tracker_core.player_id = 1
         self.tracker_core.set_hints({})
         try:

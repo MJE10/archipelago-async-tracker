@@ -27,6 +27,7 @@ def get_logic_items(players_path, player_name, image_tag="asynctracker:latest"):
         )
         
         stdout = result.stdout
+        # print(result.stderr)
         items = []
         
         # Parse the output
