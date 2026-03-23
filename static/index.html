@@ -54,7 +54,7 @@
             <div class="flex flex-col gap-4 bg-[#1e1e1e] p-4 md:p-6 rounded-xl border border-gray-800 shadow-2xl">
                 <div class="flex flex-row justify-between items-center">
                     <div>
-                        <h1 class="text-xl md:text-3xl font-bold tracking-tight bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">Logic Tracker</h1>
+                        <a href="https://docs.google.com/spreadsheets/d/1v07zBdO-jEESKb37jE02i2TVpLUgUkGsR8NGpdDebGk/edit?gid=0#gid=0"><h1 class="text-xl md:text-3xl font-bold tracking-tight bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">Logic Tracker</h1></a>
                         <p id="status-text" class="text-[9px] md:text-xs text-gray-500 uppercase tracking-widest">Initializing...</p>
                     </div>
                     <div class="flex gap-2">
@@ -98,7 +98,7 @@
                 const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
                 const datePart = date.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' });
                 const timePart = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-                return `${dayName} ${datePart} at ${timePart}`;
+                return `Last activity: ${dayName} ${datePart} at ${timePart}`;
             } catch (e) { return gmtString; }
         }
 
@@ -108,7 +108,28 @@
                 CURRENT_DATA = await response.json();
                 render();
                 updateStatus(`Updated: ${new Date().toLocaleTimeString()}`);
-            } catch (err) { updateStatus("Connection Error", "text-red-500"); }
+            } catch (err) { console.log(err); updateStatus("Connection Error", "text-red-500"); }
+        }
+
+        // NEW: Handles the global "Refresh All" logic
+        async function globalAction(action) {
+            if (action === 'refresh') {
+                const originalStatus = STATUS_EL.textContent;
+                updateStatus("Refreshing all trackers...", "text-blue-400");
+                
+                try {
+                    const response = await fetch('/refresh_all');
+                    if (response.ok) {
+                        // Re-fetch the updated data after a successful refresh
+                        await fetchData();
+                    } else {
+                        updateStatus("Refresh failed on server", "text-red-500");
+                    }
+                } catch (err) {
+                    console.error("Global refresh error:", err);
+                    updateStatus("Network Error during refresh", "text-red-500");
+                }
+            }
         }
 
         function handleSearch() {
@@ -154,6 +175,7 @@
 
         function render() {
             const container = document.getElementById('game-container');
+            if (!container) return;
             container.innerHTML = "";
 
             for (const [gameName, gamePlayers] of Object.entries(CURRENT_DATA)) {

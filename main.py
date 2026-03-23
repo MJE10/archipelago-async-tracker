@@ -7,6 +7,7 @@ app = Flask(__name__, static_folder='static')
 
 ALL_GAME_RESULTS = {}
 REFRESH_TRACKERS = []
+REFRESH_ALL = False
 SUPER_REFRESH = []
 
 @app.route('/')
@@ -41,6 +42,16 @@ def trigger_refresh_tracker(game_name):
         "current_queue_size": len(REFRESH_TRACKERS)
     })
 
+@app.route('/refresh_all')
+def trigger_refresh_all():
+    global REFRESH_ALL
+    REFRESH_ALL = True
+    
+    update_all_games()
+    r.delete("tracker:*")
+
+    return "Ok"
+
 @app.route('/super_refresh/<path:game_name>')
 def trigger_super_refresh(game_name):
     """Adds a game to the queue to have ALL cached data wiped."""
@@ -67,7 +78,7 @@ def background_update_loop():
         time.sleep(30)
 
 def update_all_games():
-    global ALL_GAME_RESULTS, REFRESH_TRACKERS, SUPER_REFRESH
+    global ALL_GAME_RESULTS, REFRESH_TRACKERS, SUPER_REFRESH, REFRESH_ALL
     with open("games.yaml", 'r') as f:
         games = yaml.load(f, Loader=yaml.SafeLoader)
         # print(json.dumps(games, indent=4))
@@ -87,8 +98,10 @@ def update_all_games():
         if name == "default":
             register_prop_defaults(game)
             continue
+        if game is None:
+            game = {}
         game["name"] = name
-        if game["name"] in REFRESH_TRACKERS:
+        if game["name"] in REFRESH_TRACKERS or REFRESH_ALL:
             clear_tracker_cache(game)
         if game["name"] in SUPER_REFRESH:
             clear_game_cache(game)
@@ -96,20 +109,26 @@ def update_all_games():
         # if tracker_info_unchanged(game):
         #     continue
         # any_updated = True
-        if name not in memory:
-            memory[name] = {
-                "hints": {},
-                "players": {}
-            }
-            for player in room_status(game)["players"]:
-                memory[name][player[0]] = {
-                    "items": {},
-                    "locations": 0
+        all_results[name] = {
+            "settings": game,
+            "players": {}
+        }
+        if "link" in game:
+            if name not in memory:
+                memory[name] = {
+                    "hints": {},
+                    "players": {}
                 }
-        all_results[name] = process_game(name, game, memory[name])
+                for player in room_status(game)["players"]:
+                    memory[name][player[0]] = {
+                        "items": {},
+                        "locations": 0
+                    }
+            all_results[name]["players"] = process_game(name, game, memory[name])
     ALL_GAME_RESULTS = all_results
     REFRESH_TRACKERS = []
     SUPER_REFRESH = []
+    REFRESH_ALL = False
     
     # if any_updated:
     #     with open("memory.json", "w") as f:
