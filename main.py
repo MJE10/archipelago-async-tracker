@@ -115,10 +115,11 @@ def update_all_games():
         }
         if "links" not in all_results[name]["settings"]:
             all_results[name]["settings"]["links"] = {}
-        all_results[name]['settings']["links"].update({
-            "Room": "https://google.com"
-        })
         if "link" in game:
+            all_results[name]['settings']["links"].update({
+                "Room": game["link"],
+                "Tracker": f"{api_path(game)}/tracker/{tracker_id(game)}"
+            })
             if name not in memory:
                 memory[name] = {
                     "hints": {},
