@@ -215,4 +215,4 @@ if __name__ == "__main__":
 
     # 3. Start the Flask server
     # host='0.0.0.0' makes it accessible on your local network
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5151)
