@@ -90,8 +90,34 @@
             if (!gmtString) return "No activity";
             try {
                 const date = new Date(gmtString);
-                return `Last activity: ${date.toLocaleDateString()} ${date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
-            } catch (e) { return gmtString; }
+                const now = new Date();
+                
+                // Normalize dates to midnight for accurate day comparison
+                const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                const yesterday = new Date(today);
+                yesterday.setDate(yesterday.getDate() - 1);
+                const activityDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+                let datePart;
+                if (activityDate.getTime() === today.getTime()) {
+                    datePart = "Today";
+                } else if (activityDate.getTime() === yesterday.getTime()) {
+                    datePart = "Yesterday";
+                } else {
+                    datePart = date.toLocaleDateString();
+                }
+
+                // 'hour: numeric' removes leading zeros (e.g., 9:00 instead of 09:00)
+                const timePart = date.toLocaleTimeString([], { 
+                    hour: 'numeric', 
+                    minute: '2-digit', 
+                    hour12: true 
+                });
+
+                return `Last activity: ${datePart} ${timePart}`;
+            } catch (e) { 
+                return gmtString; 
+            }
         }
 
         function getDeadlineCountdown(dateStr) {
@@ -205,7 +231,7 @@
                                         ${playerName}
                                         <svg class="w-4 h-4 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                                     </a>
-                                    <span class="f-10 text-blue-400/90 font-bold uppercase tracking-tight">${formatActivityDate(pData.last_activity)}</span>
+                                    <span class="f-10 text-blue-400/90 font-bold tracking-tight">${formatActivityDate(pData.last_activity)}</span>
                                 </div>
                                 <div class="flex items-center justify-center f-12 font-mono text-gray-300 font-bold bg-black/50 px-3 py-1 rounded-md h-7 border border-white/10 shadow-inner">
                                     <span class="text-green-500">${pData.num_locations_checked || 0}</span>&nbsp;/&nbsp;<span class="text-yellow-500">${pData.in_logic?.length || 0}</span>&nbsp;/&nbsp;<span class="text-gray-500">${pData.num_locations_total || 0}</span>
