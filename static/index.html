@@ -11,7 +11,6 @@
         .card { background-color: #1e1e1e; border: 1px solid #333; transition: border-color 0.2s; }
         .card:hover { border-color: #444; }
 
-        /* Smooth Accordion Animation */
         .collapse-wrapper {
             display: grid;
             grid-template-rows: 1fr;
@@ -25,11 +24,9 @@
         }
         .collapse-inner { overflow: hidden; }
 
-        /* Rotate Icon Animation */
         .rotate-icon { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); transform: rotate(0deg); }
         .collapsed .rotate-icon { transform: rotate(-90deg); }
 
-        /* Content Entrance Animation */
         @keyframes fadeInScale {
             from { opacity: 0; transform: translateY(4px) scale(0.98); }
             to { opacity: 1; transform: translateY(0) scale(1); }
@@ -54,7 +51,7 @@
             <div class="flex flex-col gap-4 bg-[#1e1e1e] p-4 md:p-6 rounded-xl border border-gray-800 shadow-2xl">
                 <div class="flex flex-row justify-between items-center">
                     <div>
-                        <a href="https://docs.google.com/spreadsheets/d/1v07zBdO-jEESKb37jE02i2TVpLUgUkGsR8NGpdDebGk/edit?gid=0#gid=0"><h1 class="text-xl md:text-3xl font-bold tracking-tight bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">Logic Tracker</h1></a>
+                        <a href="#"><h1 class="text-xl md:text-3xl font-bold tracking-tight bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">Logic Tracker</h1></a>
                         <p id="status-text" class="text-[9px] md:text-xs text-gray-500 uppercase tracking-widest">Initializing...</p>
                     </div>
                     <div class="flex gap-2">
@@ -69,7 +66,7 @@
                 </div>
 
                 <div class="relative">
-                    <input type="text" id="global-search" oninput="handleSearch()" placeholder="Filter items/locations..." 
+                    <input type="text" id="global-search" oninput="handleSearch()" placeholder="Filter items/locations/players..." 
                         class="w-full bg-black/40 border border-gray-700 rounded-lg py-2.5 px-10 text-sm focus:outline-none focus:border-blue-500 text-gray-200 transition-all focus:ring-2 focus:ring-blue-500/20">
                     <svg class="w-4 h-4 absolute left-3.5 top-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                 </div>
@@ -84,7 +81,7 @@
     </div>
 
     <script>
-        const STORAGE_PREFIX = "logic_v4_";
+        const STORAGE_PREFIX = "logic_v5_";
         const STATUS_EL = document.getElementById('status-text');
         const SEARCH_EL = document.getElementById('global-search');
         let CURRENT_DATA = {};
@@ -95,11 +92,29 @@
             if (!gmtString) return "No activity";
             try {
                 const date = new Date(gmtString);
-                const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
-                const datePart = date.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' });
-                const timePart = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-                return `Last activity: ${dayName} ${datePart} at ${timePart}`;
+                return `Last activity: ${date.toLocaleDateString()} at ${date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
             } catch (e) { return gmtString; }
+        }
+
+        // Helper to parse "YYYY/MM/DD HH:MM AM/PM" and return countdown
+        function getDeadlineCountdown(dateStr) {
+            if (!dateStr) return null;
+            try {
+                // Normalize "2024/12/31 11:59 PM" for JS Date
+                const d = new Date(dateStr.replace(/\//g, '-'));
+                const now = new Date();
+                const diff = d - now;
+                
+                if (diff <= 0) return "Deadline Passed";
+                
+                const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+                const mins = Math.floor((diff / 1000 / 60) % 60);
+                
+                if (days > 0) return `${days}d ${hours}h remaining`;
+                if (hours > 0) return `${hours}h ${mins}m remaining`;
+                return `${mins}m remaining`;
+            } catch (e) { return null; }
         }
 
         async function fetchData() {
@@ -108,27 +123,17 @@
                 CURRENT_DATA = await response.json();
                 render();
                 updateStatus(`Updated: ${new Date().toLocaleTimeString()}`);
-            } catch (err) { console.log(err); updateStatus("Connection Error", "text-red-500"); }
+            } catch (err) { console.error(err); updateStatus("Connection Error", "text-red-500"); }
         }
 
-        // NEW: Handles the global "Refresh All" logic
         async function globalAction(action) {
             if (action === 'refresh') {
-                const originalStatus = STATUS_EL.textContent;
                 updateStatus("Refreshing all trackers...", "text-blue-400");
-                
                 try {
                     const response = await fetch('/refresh_all');
-                    if (response.ok) {
-                        // Re-fetch the updated data after a successful refresh
-                        await fetchData();
-                    } else {
-                        updateStatus("Refresh failed on server", "text-red-500");
-                    }
-                } catch (err) {
-                    console.error("Global refresh error:", err);
-                    updateStatus("Network Error during refresh", "text-red-500");
-                }
+                    if (response.ok) await fetchData();
+                    else updateStatus("Refresh failed", "text-red-500");
+                } catch (err) { updateStatus("Network Error", "text-red-500"); }
             }
         }
 
@@ -138,21 +143,10 @@
         }
 
         function collapseAll() {
-            const sections = document.querySelectorAll('[id^="g_"], [id^="p_"]');
-            sections.forEach(el => {
+            document.querySelectorAll('[id^="g_"], [id^="p_"]').forEach(el => {
                 el.classList.add('collapsed');
                 localStorage.setItem(STORAGE_PREFIX + el.id, 'true');
             });
-        }
-
-        function setPlayerTab(playerId, tab) {
-            PLAYER_TABS[playerId] = tab;
-            render();
-        }
-
-        function updateStatus(msg, colorClass = "text-gray-500") {
-            STATUS_EL.textContent = msg;
-            STATUS_EL.className = `text-[9px] md:text-xs mt-1 uppercase tracking-widest ${colorClass}`;
         }
 
         function toggleCollapse(id) {
@@ -168,9 +162,7 @@
 
         function matchesSearch(text) {
             if (!SEARCH_QUERY) return true;
-            const words = SEARCH_QUERY.split(/\s+/).filter(w => w.length > 0);
-            const lowerText = text.toLowerCase();
-            return words.every(word => lowerText.includes(word));
+            return SEARCH_QUERY.split(/\s+/).every(word => text.toLowerCase().includes(word));
         }
 
         function render() {
@@ -178,23 +170,53 @@
             if (!container) return;
             container.innerHTML = "";
 
-            for (const [gameName, gamePlayers] of Object.entries(CURRENT_DATA)) {
+            for (const [gameName, gameData] of Object.entries(CURRENT_DATA)) {
+                const settings = gameData.settings || {};
+                const players = gameData.players || null;
                 const gameId = `g_${btoa(gameName).replace(/[^a-z0-9]/gi, '')}`;
-                const playerHTML = renderPlayers(gameName, gamePlayers);
-                if (SEARCH_QUERY && playerHTML.trim() === "") continue;
+                
+                const deadlineText = getDeadlineCountdown(settings.deadline);
+                const playerHTML = players && settings.link ? renderPlayers(gameName, players) : "";
+
+                // Logic check: if searching and nothing matches, skip
+                if (SEARCH_QUERY && !matchesSearch(gameName) && playerHTML.trim() === "") continue;
 
                 const section = document.createElement('div');
                 section.id = gameId;
                 section.className = `card rounded-xl overflow-hidden mb-4 md:mb-6 ${isCollapsed(gameId) ? 'collapsed' : ''}`;
+                
                 section.innerHTML = `
-                    <div class="flex items-center justify-between p-3 md:p-4 bg-[#252525] border-b border-gray-800 cursor-pointer hover:bg-[#2a2a2a] transition-colors" onclick="toggleCollapse('${gameId}')">
-                        <div class="flex items-center">
-                            <svg class="rotate-icon w-4 h-4 mr-2 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    <div class="flex flex-col md:flex-row md:items-center justify-between p-3 md:p-4 bg-[#252525] border-b border-gray-800 cursor-pointer hover:bg-[#2a2a2a] transition-colors" onclick="toggleCollapse('${gameId}')">
+                        <div class="flex items-center gap-2 overflow-hidden">
+                            <svg class="rotate-icon w-4 h-4 text-blue-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                             <h2 class="text-base md:text-xl font-bold text-white truncate">${gameName}</h2>
+                            ${settings.status ? `<span class="px-2 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 font-medium">${settings.status}</span>` : ''}
+                        </div>
+                        <div class="flex items-center gap-2 mt-2 md:mt-0 ml-6 md:ml-0">
+                            ${deadlineText ? `<span class="px-2 py-0.5 rounded text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 font-mono">${deadlineText}</span>` : ''}
                         </div>
                     </div>
                     <div class="collapse-wrapper">
-                        <div class="collapse-inner p-2 md:p-4 space-y-4 bg-[#1a1a1a] border-t border-gray-800/50">${playerHTML}</div>
+                        <div class="collapse-inner p-2 md:p-4 space-y-4 bg-[#1a1a1a] border-t border-gray-800/50">
+                            <div class="hidden md:block mb-4 p-4 bg-black/20 rounded-lg border border-gray-800/50">
+                                ${settings.description ? `<p class="text-sm text-gray-400 mb-3 leading-relaxed">${settings.description}</p>` : ''}
+                                ${settings.links ? `
+                                    <div class="flex flex-wrap gap-3">
+                                        ${Object.entries(settings.links).map(([label, url]) => `
+                                            <a href="${url}" target="_blank" class="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 underline decoration-blue-500/30">
+                                                ${label} ↗
+                                            </a>
+                                        `).join('')}
+                                    </div>
+                                ` : ''}
+                            </div>
+
+                            ${playerHTML ? playerHTML : `
+                                <div class="text-center py-8 text-gray-600 italic text-sm">
+                                    ${settings.link ? 'Gathering player data...' : 'Waiting for game to start...'}
+                                </div>
+                            `}
+                        </div>
                     </div>
                 `;
                 container.appendChild(section);
@@ -206,15 +228,15 @@
                 const playerId = `p_${btoa(gameName + playerName).replace(/[^a-z0-9]/gi, '')}`;
                 const activeTab = PLAYER_TABS[playerId] || 'locations';
                 
-                const filteredLocs = pData.in_logic.filter(loc => matchesSearch(loc));
-                const sortedItems = Object.entries(pData.items)
+                const filteredLocs = (pData.in_logic || []).filter(loc => matchesSearch(loc));
+                const sortedItems = Object.entries(pData.items || {})
                     .filter(([name]) => matchesSearch(name))
                     .sort((a, b) => (b[1] !== a[1]) ? b[1] - a[1] : a[0].localeCompare(b[0]));
 
-                if (SEARCH_QUERY && filteredLocs.length === 0 && sortedItems.length === 0) return '';
+                if (SEARCH_QUERY && !matchesSearch(playerName) && filteredLocs.length === 0 && sortedItems.length === 0) return '';
 
-                const donePct = (pData.num_locations_checked / pData.num_locations_total) * 100;
-                const doablePct = (pData.in_logic.length / pData.num_locations_total) * 100;
+                const donePct = (pData.num_locations_checked / pData.num_locations_total) * 100 || 0;
+                const doablePct = (filteredLocs.length / pData.num_locations_total) * 100 || 0;
 
                 return `
                     <div class="border border-gray-800 rounded-lg overflow-hidden bg-black/10 mb-2 ${isCollapsed(playerId) ? 'collapsed' : ''}" id="${playerId}">
@@ -225,7 +247,7 @@
                                     <span class="text-[9px] text-blue-400 font-medium">${formatActivityDate(pData.last_activity)}</span>
                                 </div>
                                 <div class="text-[10px] font-mono text-gray-400 text-right">
-                                    <span class="text-green-500">${pData.num_locations_checked}</span>/<span class="text-yellow-500">${pData.in_logic.length}</span>/<span class="text-gray-500">${pData.num_locations_total}</span>
+                                    <span class="text-green-500">${pData.num_locations_checked || 0}</span>/<span class="text-yellow-500">${pData.in_logic?.length || 0}</span>/<span class="text-gray-500">${pData.num_locations_total || 0}</span>
                                 </div>
                             </div>
                             <div class="w-full h-1.5 bg-gray-800 rounded-full flex overflow-hidden">
@@ -237,25 +259,24 @@
                         <div class="collapse-wrapper">
                             <div class="collapse-inner border-t border-gray-800/50">
                                 <div class="flex md:hidden border-b border-gray-800 bg-black/20">
-                                    <button onclick="event.stopPropagation(); setPlayerTab('${playerId}', 'locations')" class="flex-1 py-2.5 text-[10px] font-bold uppercase tracking-widest tab-btn ${activeTab === 'locations' ? 'active' : 'text-gray-500'}">Locations (${filteredLocs.length})</button>
-                                    <button onclick="event.stopPropagation(); setPlayerTab('${playerId}', 'items')" class="flex-1 py-2.5 text-[10px] font-bold uppercase tracking-widest tab-btn ${activeTab === 'items' ? 'active' : 'text-gray-500'}">Items (${sortedItems.length})</button>
+                                    <button onclick="event.stopPropagation(); setPlayerTab('${playerId}', 'locations')" class="flex-1 py-2.5 text-[10px] font-bold uppercase tracking-widest tab-btn ${activeTab === 'locations' ? 'active' : 'text-gray-500'}">Locations</button>
+                                    <button onclick="event.stopPropagation(); setPlayerTab('${playerId}', 'items')" class="flex-1 py-2.5 text-[10px] font-bold uppercase tracking-widest tab-btn ${activeTab === 'items' ? 'active' : 'text-gray-500'}">Items</button>
                                 </div>
-
                                 <div class="grid grid-cols-1 md:grid-cols-2">
                                     <div class="${activeTab === 'locations' ? 'block animate-content' : 'hidden md:block'} p-3 md:p-4 border-b md:border-b-0 md:border-r border-gray-800">
-                                        <h4 class="hidden md:block text-[9px] uppercase text-yellow-500 font-bold mb-3 tracking-widest">Reachable Locations</h4>
+                                        <h4 class="hidden md:block text-[9px] uppercase text-yellow-500 font-bold mb-3 tracking-widest">Reachable</h4>
                                         <div class="grid grid-cols-1 gap-1.5">
-                                            ${filteredLocs.map(l => `<div class="text-[11px] text-gray-400 truncate tracking-tight hover:text-yellow-400 transition-colors">• ${l}</div>`).join('') || '<div class="text-gray-600 text-[10px] italic">No reachable locations found.</div>'}
+                                            ${filteredLocs.map(l => `<div class="text-[11px] text-gray-400 truncate tracking-tight hover:text-yellow-400 transition-colors">• ${l}</div>`).join('') || '<div class="text-gray-600 text-[10px] italic">None.</div>'}
                                         </div>
                                     </div>
                                     <div class="${activeTab === 'items' ? 'block animate-content' : 'hidden md:block'} p-3 md:p-4 bg-black/10">
-                                        <h4 class="hidden md:block text-[9px] uppercase text-blue-400 font-bold mb-3 tracking-widest">Current Inventory</h4>
+                                        <h4 class="hidden md:block text-[9px] uppercase text-blue-400 font-bold mb-3 tracking-widest">Inventory</h4>
                                         <div class="grid grid-cols-2 md:grid-cols-1 lg:grid-cols-2 gap-2">
                                             ${sortedItems.map(([n, c]) => `
-                                                <div class="flex justify-between bg-gray-800/40 hover:bg-gray-700/50 rounded px-2 py-1.5 text-[10px] border border-gray-700/30 transition-all hover:scale-[1.02]">
+                                                <div class="flex justify-between bg-gray-800/40 hover:bg-gray-700/50 rounded px-2 py-1.5 text-[10px] border border-gray-700/30 transition-all">
                                                     <span class="truncate text-gray-300 font-medium">${n}</span>
                                                     <span class="text-blue-400 font-bold ml-1">x${c}</span>
-                                                </div>`).join('') || '<div class="text-gray-600 text-[10px] italic">Inventory is empty.</div>'}
+                                                </div>`).join('') || '<div class="text-gray-600 text-[10px] italic">Empty.</div>'}
                                         </div>
                                     </div>
                                 </div>
@@ -264,6 +285,16 @@
                     </div>
                 `;
             }).join('');
+        }
+
+        function setPlayerTab(playerId, tab) {
+            PLAYER_TABS[playerId] = tab;
+            render();
+        }
+
+        function updateStatus(msg, colorClass = "text-gray-500") {
+            STATUS_EL.textContent = msg;
+            STATUS_EL.className = `text-[9px] md:text-xs mt-1 uppercase tracking-widest ${colorClass}`;
         }
 
         fetchData();

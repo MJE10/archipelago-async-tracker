@@ -113,6 +113,11 @@ def update_all_games():
             "settings": game,
             "players": {}
         }
+        if "links" not in all_results[name]["settings"]:
+            all_results[name]["settings"]["links"] = {}
+        all_results[name]['settings']["links"].update({
+            "google": "https://google.com"
+        })
         if "link" in game:
             if name not in memory:
                 memory[name] = {
