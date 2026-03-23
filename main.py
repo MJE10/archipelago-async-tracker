@@ -144,7 +144,7 @@ def process_game(name, game, memory):
     print(f"Now processing: {name}")
 
     # API calls
-    room_status(game)
+    room = room_status(game)
     for idx in range(len(room_status(game)['players'])):
         datapackage(game, idx)
         break
@@ -157,6 +157,7 @@ def process_game(name, game, memory):
     for player in room_status(game)["players"]:
         if player[0] in game_prop(game, "players"):
             per_player[player[0]] = {
+                "ut_link": f"ut://{api_path(game).split("://")[1]}:{room["last_port"]}/{player[0]}/{str(game_prop(game, "password"))}",
                 "in_logic": [],
                 "num_locations_checked": 0,
                 "num_locations_total": 1
