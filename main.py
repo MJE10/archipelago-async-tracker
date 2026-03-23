@@ -154,6 +154,10 @@ def process_game(name, game, memory):
     non_new_items = {}
     new_locations = {}
     interesting_players = {}
+    for (p, player) in enumerate(tracker["activity_timers"]):
+        player_name = player_idx_to_name(game, p)
+        if player_name in per_player:
+            per_player[player_name]["last_activity"] = player["time"]
     for (p, player) in enumerate(tracker["player_items_received"]):
         player_name = player_idx_to_name(game, p)
         data = datapackage(game, p)
