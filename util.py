@@ -189,4 +189,5 @@ def calculate_trackers(game, interesting_players):
             # 6. Store in Redis for 24 hours
             r.set(new_redis_key, json.dumps(result), ex=86400)
 
+    print(f"All logic generation complete for {game['name']}")
     return in_logic

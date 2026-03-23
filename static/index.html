@@ -15,7 +15,10 @@
         .collapsed .rotate-icon { transform: rotate(-90deg); }
         .btn { transition: all 0.2s; cursor: pointer; }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .location-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 0.5rem; }
+        .grid-layout { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.5rem; }
+        
+        /* Progress Bar Smoothing */
+        .progress-segment { transition: width 0.5s ease-in-out; }
     </style>
 </head>
 <body class="p-4 md:p-8">
@@ -40,7 +43,7 @@
     </div>
 
     <script>
-        const STORAGE_PREFIX = "logic_v1_";
+        const STORAGE_PREFIX = "logic_v2_";
         const STATUS_EL = document.getElementById('status-text');
         let CURRENT_DATA = {};
 
@@ -74,6 +77,7 @@
 
         async function fetchData() {
             try {
+                // Assuming the API returns the format: { Game: { Player: { stats } } }
                 const response = await fetch('/games');
                 const data = await response.json();
                 CURRENT_DATA = data;
@@ -100,7 +104,6 @@
         }
 
         function isCollapsed(id) {
-            // Default to true (collapsed) if it's the first time seeing this ID
             const stored = localStorage.getItem(STORAGE_PREFIX + id);
             return stored === null ? false : stored === 'true';
         }
@@ -117,14 +120,13 @@
                 return;
             }
 
-            for (const [gameName, gameData] of Object.entries(data)) {
-                // Create a safe ID for the DOM
+            for (const [gameName, gamePlayers] of Object.entries(data)) {
                 const gameId = `g_${btoa(gameName).replace(/[^a-z0-9]/gi, '')}`;
                 const gameCollapsed = isCollapsed(gameId);
 
                 const gameSection = document.createElement('div');
                 gameSection.id = gameId;
-                gameSection.className = `card rounded-xl shadow-lg overflow-hidden ${gameCollapsed ? 'collapsed' : ''}`;
+                gameSection.className = `card rounded-xl shadow-lg overflow-hidden mb-6 ${gameCollapsed ? 'collapsed' : ''}`;
 
                 gameSection.innerHTML = `
                     <div class="flex flex-wrap items-center justify-between p-4 bg-[#252525] border-b border-gray-800">
@@ -133,12 +135,12 @@
                             <h2 class="text-xl font-bold text-white">${gameName}</h2>
                         </div>
                         <div class="flex gap-2 mt-2 md:mt-0">
-                            <button onclick="triggerAction('refresh', '${gameName.replace(/'/g, "\\'")}')" class="btn text-xs bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded font-medium">Refresh Tracker</button>
+                            <button onclick="triggerAction('refresh', '${gameName.replace(/'/g, "\\'")}')" class="btn text-xs bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded font-medium">Refresh</button>
                             <button onclick="triggerAction('super', '${gameName.replace(/'/g, "\\'")}')" class="btn text-xs bg-red-900/40 hover:bg-red-900/60 text-red-200 px-3 py-1.5 rounded font-medium border border-red-800/50">Super Refresh</button>
                         </div>
                     </div>
-                    <div class="collapse-content p-4 space-y-4 bg-[#1a1a1a]">
-                        ${renderPlayers(gameName, gameData.in_logic)}
+                    <div class="collapse-content p-4 space-y-6 bg-[#1a1a1a]">
+                        ${renderPlayers(gameName, gamePlayers)}
                     </div>
                 `;
                 container.appendChild(gameSection);
@@ -146,29 +148,68 @@
         }
 
         function renderPlayers(gameName, players) {
-            return Object.entries(players).map(([playerName, locations]) => {
+            return Object.entries(players).map(([playerName, pData]) => {
                 const playerId = `p_${btoa(gameName + playerName).replace(/[^a-z0-9]/gi, '')}`;
                 const playerCollapsed = isCollapsed(playerId);
 
+                // Math for Progress Bar
+                const donePct = (pData.num_locations_checked / pData.num_locations_total) * 100;
+                const doablePct = (pData.in_logic.length / pData.num_locations_total) * 100;
+                
                 return `
-                    <div class="border border-gray-800 rounded-lg overflow-hidden shadow-sm ${playerCollapsed ? 'collapsed' : ''}" id="${playerId}">
-                        <div class="flex items-center p-3 bg-gray-800/30 hover:bg-gray-800/50 cursor-pointer transition-colors" onclick="toggleCollapse('${playerId}')">
-                            <svg class="rotate-icon w-4 h-4 mr-2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                            <span class="font-semibold text-gray-200">${playerName}</span>
-                            <span class="ml-auto text-[10px] font-bold tracking-tighter bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded uppercase">
-                                ${locations.length} In Logic
-                            </span>
+                    <div class="border border-gray-800 rounded-lg overflow-hidden shadow-sm bg-black/10 ${playerCollapsed ? 'collapsed' : ''}" id="${playerId}">
+                        <div class="flex flex-col p-4 bg-gray-800/30 hover:bg-gray-800/40 transition-colors cursor-pointer" onclick="toggleCollapse('${playerId}')">
+                            <div class="flex items-center justify-between mb-3">
+                                <div class="flex items-center">
+                                    <svg class="rotate-icon w-4 h-4 mr-2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                    <span class="font-bold text-lg text-gray-100">${playerName}</span>
+                                </div>
+                                <div class="text-xs font-mono text-gray-400">
+                                    <span class="text-green-500">${pData.num_locations_checked}</span> / 
+                                    <span class="text-yellow-500">${pData.in_logic.length}</span> / 
+                                    <span class="text-gray-500">${pData.num_locations_total}</span>
+                                </div>
+                            </div>
+                            
+                            <div class="w-full h-2.5 bg-gray-800 rounded-full flex overflow-hidden border border-gray-700/50">
+                                <div class="progress-segment bg-green-500 h-full shadow-[0_0_10px_rgba(34,197,94,0.3)]" style="width: ${donePct}%"></div>
+                                <div class="progress-segment bg-yellow-500 h-full shadow-[0_0_10px_rgba(234,179,8,0.3)]" style="width: ${doablePct}%"></div>
+                            </div>
                         </div>
-                        <div class="collapse-content bg-black/20">
-                            <div class="p-4 location-grid">
-                                ${locations.length > 0 
-                                    ? locations.map(loc => `
-                                        <div class="flex items-start text-sm text-gray-400 group">
-                                            <span class="w-1.5 h-1.5 mt-1.5 bg-green-500/60 rounded-full mr-2 group-hover:bg-green-400 shrink-0"></span>
-                                            <span class="leading-tight group-hover:text-gray-200">${loc}</span>
-                                        </div>`).join('')
-                                    : '<div class="text-gray-600 text-xs italic">No locations currently reachable.</div>'
-                                }
+
+                        <div class="collapse-content border-t border-gray-800/50">
+                            <div class="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-gray-800">
+                                <div class="p-4">
+                                    <h4 class="text-[10px] uppercase tracking-widest text-yellow-500 font-bold mb-3 flex items-center">
+                                        <span class="w-2 h-2 bg-yellow-500 rounded-full mr-2"></span> Reachable Locations
+                                    </h4>
+                                    <div class="grid-layout">
+                                        ${pData.in_logic.length > 0 
+                                            ? pData.in_logic.map(loc => `
+                                                <div class="flex items-start text-xs text-gray-400 group">
+                                                    <span class="w-1 h-1 mt-1.5 bg-gray-600 rounded-full mr-2 shrink-0"></span>
+                                                    <span class="leading-tight group-hover:text-yellow-400 transition-colors">${loc}</span>
+                                                </div>`).join('')
+                                            : '<div class="text-gray-600 text-xs italic">No locations in logic.</div>'
+                                        }
+                                    </div>
+                                </div>
+
+                                <div class="p-4 bg-black/20">
+                                    <h4 class="text-[10px] uppercase tracking-widest text-blue-400 font-bold mb-3 flex items-center">
+                                        <span class="w-2 h-2 bg-blue-500 rounded-full mr-2"></span> Inventory
+                                    </h4>
+                                    <div class="grid-layout">
+                                        ${Object.entries(pData.items).length > 0 
+                                            ? Object.entries(pData.items).map(([itemName, count]) => `
+                                                <div class="flex justify-between items-center bg-gray-800/40 rounded px-2 py-1 border border-gray-700/30">
+                                                    <span class="text-xs text-gray-300 truncate mr-2">${itemName}</span>
+                                                    <span class="text-[10px] font-bold bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">x${count}</span>
+                                                </div>`).join('')
+                                            : '<div class="text-gray-600 text-xs italic">No items collected.</div>'
+                                        }
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -180,7 +221,7 @@
          * Init
          */
         fetchData();
-        setInterval(fetchData, 60000); // Poll once a minute
+        setInterval(fetchData, 60000); 
     </script>
 </body>
 </html>

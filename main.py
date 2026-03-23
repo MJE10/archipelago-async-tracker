@@ -60,10 +60,10 @@ def trigger_super_refresh(game_name):
 def background_update_loop():
     """Runs the infinite loop in a separate thread."""
     while True:
-        try:
-            update_all_games()
-        except Exception as e:
-            print(f"Error in update loop: {e}")
+        # try:
+        update_all_games()
+        # except Exception as e:
+        #     print(f"Error in update loop: {e}")
         time.sleep(30)
 
 def update_all_games():
@@ -73,13 +73,13 @@ def update_all_games():
         # print(json.dumps(games, indent=4))
 
     memory = {}
-    if os.path.exists("memory.json"):
-        with open("memory.json", "r") as f:
-            memory = json.loads(f.read())
-        memory_keys = memory.keys()
-        for k in memory_keys:
-            if k not in games:
-                memory.pop(k)
+    # if os.path.exists("memory.json"):
+    #     with open("memory.json", "r") as f:
+    #         memory = json.loads(f.read())
+    #     memory_keys = memory.keys()
+    #     for k in memory_keys:
+    #         if k not in games:
+    #             memory.pop(k)
     
     # any_updated = False
     all_results = {}
@@ -125,8 +125,22 @@ def process_game(name, game, memory):
         break
 
     tracker = fetch_tracker(game)
+    static = static_tracker(game)
 
     # Determine what has changed
+    per_player = {}
+    for player in room_status(game)["players"]:
+        if player[0] in game_prop(game, "players"):
+            per_player[player[0]] = {
+                "in_logic": [],
+                "num_locations_checked": 0,
+                "num_locations_total": 1
+            }
+    for p, player in enumerate(static["player_locations_total"]):
+        player_name = player_idx_to_name(game, p)
+        if player_name in per_player:
+            per_player[player_name]["num_locations_total"] = player["total_locations"]
+
     new_hints = {}
     updated_hints = {}
     for p in tracker["hints"]:
@@ -142,35 +156,52 @@ def process_game(name, game, memory):
     interesting_players = {}
     for (p, player) in enumerate(tracker["player_items_received"]):
         player_name = player_idx_to_name(game, p)
+        data = datapackage(game, p)
         if player_name in game_prop(game, "players"):
             interesting_players[player_name] = {"index": p, "items": player["items"], "checks_done": []}
+        gui_items = {}
         for item in player["items"]:
             item = item[IDX_ITEM_ITEM]
             curr_non_new = non_new_items.get(item, 0)
+            item_name = None
+            for item_name2 in data["item_name_to_id"]:
+                if data["item_name_to_id"][item_name2] == item:
+                    item_name = item_name2
+                    break
+            if item_name is not None:
+                gui_items[item_name] = gui_items.get(item_name, 0) + 1
             if curr_non_new < memory[player_name]["items"].get(item, 0):
                 non_new_items[item] = curr_non_new + 1
             else:
                 if player_name not in new_items:
                     new_items[player_name] = {}
                 new_items[player_name][item] = new_items[player_name].get(item, 0) + 1
+        if player_name in per_player:
+            per_player[player_name]["items"] = gui_items
     for (p, player) in enumerate(tracker["player_checks_done"]):
         player_name = player_idx_to_name(game, p)
-        if player_name in interesting_players:
+        if player_name in per_player:
+            per_player[player_name]["num_locations_checked"] = len(player["locations"])
             interesting_players[player_name]["checks_done"] = player["locations"]
         locations_done = len(player["locations"])
         new_locations[player_name] = locations_done - memory[player_name]["locations"]
     
     # Determine things that are in logic
     in_logic = calculate_trackers(game, interesting_players)
-    print(in_logic)
+    for player_name in in_logic:
+        if player_name in per_player:
+            per_player[player_name]["in_logic"] = in_logic[player_name]
+    # print(in_logic)
 
-    return {
-        # "new_hints": new_hints,
-        # "updated_hints": updated_hints,
-        # "new_items": new_items,
-        # "new_locations": new_locations,
-        "in_logic": in_logic
-    }
+    return per_player
+    # return {
+    #     # "new_hints": new_hints,
+    #     # "updated_hints": updated_hints,
+    #     # "new_items": new_items,
+    #     # "new_locations": new_locations,
+    #     # "in_logic": in_logic,
+    #     # "per_player": per_player
+    # }
 
 
 if __name__ == "__main__":
