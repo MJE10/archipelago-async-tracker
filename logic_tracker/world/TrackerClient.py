@@ -113,6 +113,16 @@ class TrackerGameContext(CommonContext):
             self.tracker_core.set_items_received(items)
         self.tracker_core.player_id = 1
         self.tracker_core.set_hints({})
+        datapack_path = "/app/Archipelago/Players/data/datapackage.json"
+        if os.path.exists(datapack_path):
+            with open(datapack_path, "r") as f:
+                datapackage = json.loads(f.read())
+                self.tracker_core.multiworld.worlds[1].item_id_to_name = {}
+                for name in datapackage["item_name_to_id"]:
+                    self.tracker_core.multiworld.worlds[1].item_id_to_name[datapackage["item_name_to_id"][name]] = name
+                self.tracker_core.multiworld.worlds[1].location_id_to_name = {}
+                for name in datapackage["location_name_to_id"]:
+                    self.tracker_core.multiworld.worlds[1].item_id_to_name[datapackage["location_name_to_id"][name]] = name
         try:
             updateTracker_ret = self.tracker_core.updateTracker()
         except Exception as e:

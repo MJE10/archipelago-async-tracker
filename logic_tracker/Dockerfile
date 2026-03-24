@@ -43,6 +43,7 @@ COPY world /app/Archipelago/worlds/custom_tracker
 
 # 7. Setup Volumes and Environment
 VOLUME ["/app/Archipelago/Players"]
+VOLUME ["/app/Archipelago/custom_worlds"]
 
 # Prevents Kivy from trying to spawn a window and keeps the logs clean.
 ENV KIVY_NO_CONSOLELOG=1

@@ -12,6 +12,7 @@ def get_logic_items(players_path, player_name, image_tag="asynctracker:latest"):
     docker_cmd = [
         "docker", "run", "--rm", "--network", "none",
         "-v", f"{os.path.abspath(players_path)}:/app/Archipelago/Players",
+        "-v", f"{os.path.abspath("custom_worlds")}:/app/Archipelago/custom_worlds",
         image_tag,
         "python", "Launcher.py", "Custom Tracker", "--", 
         "--list", "--name", player_name, "--nogui"
