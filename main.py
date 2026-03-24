@@ -4,6 +4,7 @@ import threading
 from flask import Flask, jsonify, send_from_directory
 
 app = Flask(__name__, static_folder='static')
+app.json.sort_keys = False
 
 ALL_GAME_RESULTS = {}
 REFRESH_TRACKERS = []
@@ -48,7 +49,8 @@ def trigger_refresh_all():
     REFRESH_ALL = True
     
     update_all_games()
-    r.delete("tracker:*")
+    for key in r.scan_iter("tracker:*"):
+        r.delete(key)
 
     return "Ok"
 
@@ -94,6 +96,7 @@ def update_all_games():
     
     # any_updated = False
     all_results = {}
+    index = 0
     for (name, game) in games.items():
         if name == "default":
             register_prop_defaults(game)
@@ -101,18 +104,20 @@ def update_all_games():
         if game is None:
             game = {}
         game["name"] = name
-        if game["name"] in REFRESH_TRACKERS or REFRESH_ALL:
+        if "link" in game and (game["name"] in REFRESH_TRACKERS or REFRESH_ALL):
             clear_tracker_cache(game)
-        if game["name"] in SUPER_REFRESH:
+        if "link" in game and game["name"] in SUPER_REFRESH:
             clear_game_cache(game)
         # if the tracker has not changed, then we don't need to continue
         # if tracker_info_unchanged(game):
         #     continue
         # any_updated = True
         all_results[name] = {
+            "index": index,
             "settings": game,
             "players": {}
         }
+        index += 1
         if "links" not in all_results[name]["settings"]:
             all_results[name]["settings"]["links"] = {}
         if "link" in game:
@@ -130,7 +135,10 @@ def update_all_games():
                         "items": {},
                         "locations": 0
                     }
-            all_results[name]["players"] = process_game(name, game, memory[name])
+            per_player, game_checks_done, game_checks_total = process_game(name, game, memory[name])
+            all_results[name]["players"] = per_player
+            all_results[name]["game_checks_done"] = game_checks_done
+            all_results[name]["game_checks_total"] = game_checks_total
     ALL_GAME_RESULTS = all_results
     REFRESH_TRACKERS = []
     SUPER_REFRESH = []
@@ -162,7 +170,9 @@ def process_game(name, game, memory):
                 "num_locations_checked": 0,
                 "num_locations_total": 1
             }
+    game_checks_total = 0
     for p, player in enumerate(static["player_locations_total"]):
+        game_checks_total += player["total_locations"]
         player_name = player_idx_to_name(game, p)
         if player_name in per_player:
             per_player[player_name]["num_locations_total"] = player["total_locations"]
@@ -208,7 +218,9 @@ def process_game(name, game, memory):
                 new_items[player_name][item] = new_items[player_name].get(item, 0) + 1
         if player_name in per_player:
             per_player[player_name]["items"] = gui_items
+    game_checks_done = 0
     for (p, player) in enumerate(tracker["player_checks_done"]):
+        game_checks_done += len(player["locations"])
         player_name = player_idx_to_name(game, p)
         if player_name in per_player:
             per_player[player_name]["num_locations_checked"] = len(player["locations"])
@@ -223,7 +235,7 @@ def process_game(name, game, memory):
             per_player[player_name]["in_logic"] = in_logic[player_name]
     # print(in_logic)
 
-    return per_player
+    return (per_player, game_checks_done, game_checks_total)
     # return {
     #     # "new_hints": new_hints,
     #     # "updated_hints": updated_hints,

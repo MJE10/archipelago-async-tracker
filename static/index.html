@@ -169,6 +169,21 @@
                 const deadlineText = getDeadlineCountdown(settings.deadline);
                 const playerHTML = players && settings.link ? renderPlayers(gameName, players) : "";
 
+                // --- NEW PROGRESS BAR LOGIC ---
+                const done = gameData.game_checks_done;
+                const total = gameData.game_checks_total;
+                let progressBarHTML = '';
+
+                if (done !== undefined && total !== undefined && total >= 1) {
+                    const percent = Math.min(100, (done / total) * 100);
+                    progressBarHTML = `
+                        <div class="w-full h-1 bg-gray-700/50 mt-2 rounded-full overflow-hidden">
+                            <div class="bg-purple-500 h-full transition-all duration-500" style="width: ${percent}%"></div>
+                        </div>
+                    `;
+                }
+                // ------------------------------
+
                 if (SEARCH_QUERY && !matchesSearch(gameName) && playerHTML.trim() === "") continue;
 
                 const section = document.createElement('div');
@@ -179,19 +194,22 @@
                     <div class="flex items-center p-4 bg-white/5 cursor-pointer hover:bg-white/10 transition-all gap-4" onclick="toggleCollapse('${gameId}')">
                         <svg class="rotate-icon w-5 h-5 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                         
-                        <div class="flex flex-wrap items-center gap-3 min-w-0">
-                            <h2 class="f-14 font-bold text-white tracking-tight">${gameName}</h2>
-                            
-                            ${settings.status ? `<span class="inline-flex items-center px-2.5 py-0.5 rounded-md f-10 bg-blue-500/20 text-blue-300 border border-blue-500/30 font-bold uppercase tracking-widest h-5">${settings.status}</span>` : ''}
-                            ${deadlineText ? `<span class="inline-flex items-center px-2.5 py-0.5 rounded-md f-10 bg-purple-500/20 text-purple-300 border border-purple-500/30 font-mono font-bold h-5 uppercase tracking-tight">${deadlineText}</span>` : ''}
-                            
-                            <div class="hidden md:flex items-center gap-4 ml-2">
-                                ${settings.links ? Object.entries(settings.links).map(([label, url]) => `
-                                    <a href="${url}" target="_blank" onclick="event.stopPropagation()" class="f-12 text-blue-400/60 hover:text-blue-300 flex items-center gap-1 transition-colors font-bold uppercase tracking-tighter hover:underline">
-                                        ${label} ↗
-                                    </a>
-                                `).join('') : ''}
+                        <div class="flex flex-col flex-1 min-w-0">
+                            <div class="flex flex-wrap items-center gap-3">
+                                <h2 class="f-14 font-bold text-white tracking-tight">${gameName}</h2>
+                                
+                                ${settings.status ? `<span class="inline-flex items-center px-2.5 py-0.5 rounded-md f-10 bg-blue-500/20 text-blue-300 border border-blue-500/30 font-bold uppercase tracking-widest h-5">${settings.status}</span>` : ''}
+                                ${deadlineText ? `<span class="inline-flex items-center px-2.5 py-0.5 rounded-md f-10 bg-purple-500/20 text-purple-300 border border-purple-500/30 font-mono font-bold h-5 uppercase tracking-tight">${deadlineText}</span>` : ''}
+                                
+                                <div class="hidden md:flex items-center gap-4 ml-2">
+                                    ${settings.links ? Object.entries(settings.links).map(([label, url]) => `
+                                        <a href="${url}" target="_blank" onclick="event.stopPropagation()" class="f-12 text-blue-400/60 hover:text-blue-300 flex items-center gap-1 transition-colors font-bold uppercase tracking-tighter hover:underline">
+                                            ${label} ↗
+                                        </a>
+                                    `).join('') : ''}
+                                </div>
                             </div>
+                            ${progressBarHTML}
                         </div>
                     </div>
                     
