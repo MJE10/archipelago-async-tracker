@@ -173,23 +173,25 @@ def calculate_trackers(game, interesting_players):
             dest_dir = Path(tmpdirname)
             for yaml_file in path.glob('*.yaml'):
                 shutil.copy(yaml_file, dest_dir)
-            
+
             data_dir = dest_dir.joinpath("data")
             os.mkdir(data_dir)
-            
-            with open(data_dir.joinpath("items_received.json"), "w") as f:
-                f.write(json.dumps(player_data["items"]))
-            
-            with open(data_dir.joinpath("missing_checks.json"), "w") as f:
-                f.write(json.dumps(missing_checks))
-            
-            # with open(data_dir.joinpath("datapackage.json"), "w") as f:
-            #     f.write(json.dumps(datapackage(game, player_data["index"])))
-            # with open("datapackage.json", "w") as f:
-            #     f.write(json.dumps(datapackage(game, player_data["index"])))
+
+            # Build flat list of item names (with duplicates for multi-copies)
+            data = datapackage(game, player_data["index"])
+            id_to_name = {v: k for k, v in data["item_name_to_id"].items()}
+            item_names = [id_to_name[iid[0]] for iid in player_data["items"] if iid[0] in id_to_name]
+
+            # All valid location names for this player (used to filter UT output)
+            location_names = list(data["location_name_to_id"].keys())
+
+            with open(data_dir.joinpath("item_names.json"), "w") as f:
+                json.dump(item_names, f)
+
+            with open(data_dir.joinpath("location_names.json"), "w") as f:
+                json.dump(location_names, f)
 
             result = get_logic_items(tmpdirname, player_name)
-            # print(result)
             in_logic[player_name] = result
 
             # 6. Store in Redis for 24 hours

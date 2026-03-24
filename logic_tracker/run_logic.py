@@ -3,58 +3,51 @@ import os
 
 def get_logic_items(players_path, player_name, image_tag="asynctracker:latest"):
     """
-    Runs the Archipelago Docker container, executes the Custom Tracker,
-    and returns a list of items found after 'In logic list:'.
+    Runs the Archipelago Docker container, executes in_container.py (which
+    generates the game, hosts it, injects items via !getitem, and runs Universal
+    Tracker), then returns a list of location names that are currently in logic.
     """
-    
-    # Construct the docker command
-    # We use --rm to clean up the container automatically after it finishes
     docker_cmd = [
-        "docker", "run", "--rm", "--network", "none",
-        "-v", f"{os.path.abspath(players_path)}:/app/Archipelago/Players",
-        "-v", f"{os.path.abspath("custom_worlds")}:/app/Archipelago/custom_worlds",
+        "docker", "run", "--rm",
+        "-v", f"{os.path.abspath(players_path)}:/opt/Archipelago/Players",
+        "-v", f"{os.path.abspath('custom_worlds')}:/opt/Archipelago/custom_worlds",
         image_tag,
-        "python", "Launcher.py", "Custom Tracker", "--", 
-        "--list", "--name", player_name, "--nogui"
+        "python3", "/opt/Archipelago/in_container.py", "--name", player_name
     ]
 
     try:
-        # Execute and capture stdout
         result = subprocess.run(
-            docker_cmd, 
-            capture_output=True, 
-            text=True, 
+            docker_cmd,
+            capture_output=True,
+            text=True,
             check=True
         )
-        
+
         stdout = result.stdout
-        # print(result.stderr)
+        print(result.stdout)
+        print('---')
+        print(result.stderr)
         items = []
-        
-        # Parse the output
+
         if "In logic list:" in stdout:
-            # Split by the trigger phrase and take everything after it
             parts = stdout.split("In logic list:")
-            # The list items follow the phrase, usually one per line
             raw_list = parts[1].strip().splitlines()
-            
-            # Clean up whitespace and ignore empty lines
             items = [line.strip() for line in raw_list if line.strip()]
-            
+
         return items
 
     except subprocess.CalledProcessError as e:
         print(f"Error running Docker: {e.stderr}")
         return []
 
+
 # --- Usage Example ---
 if __name__ == "__main__":
-    # Update this path to your local Players folder
     path_to_players = "/home/michael/sync/ap/async-tracker/logic_tracker/Players"
     name = "MJE10_celeste"
-    
+
     logic_list = get_logic_items(path_to_players, name)
-    
+
     print(f"Found {len(logic_list)} items in logic:")
     for item in logic_list:
         print(f" - {item}")

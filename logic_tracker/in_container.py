@@ -5,63 +5,82 @@ import time
 import json
 import argparse
 import sys
+import shutil
 from websocket import create_connection
 from datetime import datetime
+
 
 def main():
     now = datetime.now()
     print(now.strftime("%Y/%m/%d %H:%M:%S"))
 
-    # Setup Argument Parsing
-    parser = argparse.ArgumentParser(description="Archipelago Automation Script")
-    parser.add_argument("--name", default="MJE10_celeste", help="Player name for connection")
-    parser.add_argument("--port", type=int, default=38281, help="Port for the host and tracker")
+    parser = argparse.ArgumentParser(description="Archipelago Logic Runner")
+    parser.add_argument("--name", default="MJE10_celeste", help="Player slot name")
+    parser.add_argument("--port", type=int, default=38243, help="Port for the AP server")
     args = parser.parse_args()
 
     base_path = "/opt/Archipelago"
-    work_dir = os.path.join(base_path, "Players/script/")
+    players_path = os.path.join(base_path, "Players")
+    custom_worlds_path = os.path.join(base_path, "custom_worlds")
+    worlds_path = os.path.join(base_path, "worlds")
+    output_dir = os.path.join(base_path, "output")
     launcher_path = os.path.join(base_path, "ArchipelagoLauncher")
 
-    # Ensure the directory exists and change to it
-    os.makedirs(work_dir, exist_ok=True)
-    os.chdir(work_dir)
+    items_file = os.path.join(players_path, "data", "item_names.json")
+    locations_file = os.path.join(players_path, "data", "location_names.json")
 
-    # 1. Run Generate synchronously
-    # print("--- Running Generation ---")
-    # gen_result = subprocess.run(
-    #     [launcher_path, "Generate"],
-    #     capture_output=True,
-    #     text=True
-    # )
-    # print(gen_result.stdout)
-    # print(gen_result.stderr)
-    # # You can access gen_result.stdout or gen_result.stderr here if needed
-    # print("Generation complete.")
+    with open(items_file, "r") as f:
+        item_names = json.load(f)
+        print(f"items: {item_names}")
 
-    # # 2. Find the zip file and run Host asynchronously
-    # output_dir = os.path.join(base_path, "output")
-    # zip_files = glob.glob(os.path.join(output_dir, "*.zip"))
+    with open(locations_file, "r") as f:
+        location_names = set(json.load(f))
+        print(f"locations: {location_names}")
 
-    # if not zip_files:
-    #     print(f"Error: No zip file found in {output_dir}")
-    #     sys.exit(1)
-    
-    # target_zip = zip_files[0]
-    # print(f"--- Hosting: {os.path.basename(target_zip)} on port {args.port} ---")
+    # 1. Copy custom worlds (tracker.apworld + any game worlds) into worlds/ so
+    #    Generate can discover them
+    os.makedirs(worlds_path, exist_ok=True)
+    for apworld in glob.glob(os.path.join(custom_worlds_path, "*.apworld")):
+        dest = os.path.join(worlds_path, os.path.basename(apworld))
+        shutil.copy2(apworld, dest)
+        print(f"Copied {os.path.basename(apworld)} to worlds/")
 
-    # # Start Host asynchronously (output goes to current process stdout/stderr)
-    # host_proc = subprocess.Popen([
-    #     launcher_path, "Host", "--", "--port", str(args.port), target_zip
-    # ])
+    # 2. Generate a game from the player YAMLs in Players/
+    # Clear any stale zips first so we always host the freshly generated seed
+    os.makedirs(output_dir, exist_ok=True)
+    for old_zip in glob.glob(os.path.join(output_dir, "*.zip")):
+        os.remove(old_zip)
+    print("--- Running Generation ---")
+    gen_result = subprocess.run(
+        [launcher_path, "Generate"],
+        capture_output=True,
+        text=True,
+        cwd=base_path
+    )
+    print(gen_result.stdout)
+    if gen_result.stderr:
+        print(gen_result.stderr, file=sys.stderr)
 
-    # 3. WebSocket communication
-    time.sleep(5) # Wait for server to initialize
+    # 3. Find the generated zip and start the server in the background
+    zip_files = glob.glob(os.path.join(output_dir, "*.zip"))
+    if not zip_files:
+        print(f"Error: No zip file found in {output_dir}", file=sys.stderr)
+        sys.exit(1)
+    target_zip = zip_files[0]
+    print(f"--- Hosting: {os.path.basename(target_zip)} on port {args.port} ---")
+
+    host_proc = subprocess.Popen([
+        launcher_path, "Host", "--", "--port", str(args.port), target_zip
+    ])
+
+    # 4. Wait for server to come up, then connect via WebSocket
+    time.sleep(5)
     ws_url = f"ws://localhost:{args.port}"
-    
+
     try:
         print(f"--- Connecting to WebSocket: {ws_url} ---")
         ws = create_connection(ws_url)
-        
+
         connect_msg = [{
             "cmd": "Connect",
             "password": "",
@@ -75,60 +94,65 @@ def main():
         }]
         ws.send(json.dumps(connect_msg))
 
-        # Listen for 3 seconds
+        # Drain connection response
         start_time = time.time()
-        ws.settimeout(0.5) # Short timeout to allow loop to check time
-        while time.time() - start_time < 2:
+        ws.settimeout(0.5)
+        while time.time() - start_time < 1:
             try:
-                result = ws.recv()
-                print(f"Received Packet: {result}")
+                ws.recv()
             except Exception:
-                # Likely a timeout, just continue until 3s is up
-                continue
-        
-        # Send !getitem commands
-        ws.send(json.dumps([{"cmd": "Say", "text": "!getitem Strawberry"}]))
-
-        # Listen for 3 seconds
-        start_time = time.time()
-        ws.settimeout(0.5) # Short timeout to allow loop to check time
-        while time.time() - start_time < 2:
-            try:
-                result = ws.recv()
-                print(f"Received Packet: {result}")
-            except Exception:
-                # Likely a timeout, just continue until 3s is up
                 continue
 
+        # 5. Give the player all the items they currently have via !getitem
+        for item_name in item_names:
+            ws.send(json.dumps([{"cmd": "Say", "text": f"!getitem {item_name}"}]))
+
+        # Wait for item grants to be processed server-side
+        time.sleep(1)
         ws.close()
-    except Exception as e:
-        print(f"WebSocket Error: {e}")
 
-    # 4. Run Universal Tracker synchronously
+    except Exception as e:
+        print(f"WebSocket Error: {e}", file=sys.stderr)
+        host_proc.terminate()
+        sys.exit(1)
+
+    # 6. Run Universal Tracker in --list mode to get in-logic locations
     print(f"--- Running Universal Tracker for {args.name} ---")
-    tracker_cmd = [
-        launcher_path, "Universal Tracker", "--",
-        "--name", args.name,
-        "--list",
-        "--nogui",
-        f"archipelago://localhost:{args.port}"
-    ]
-    
     tracker_result = subprocess.run(
-        tracker_cmd,
+        [
+            launcher_path, "Universal Tracker", "--",
+            "--name", args.name,
+            "--list",
+            "--nogui",
+            f"archipelago://localhost:{args.port}"
+        ],
         capture_output=True,
         text=True
     )
-    
-    # Printing results of the tracker run
-    print("Tracker Output:")
-    print(tracker_result.stdout)
-    if tracker_result.stderr:
-        print("Tracker Errors:", tracker_result.stderr)
 
-    print("--- Script Task Sequence Completed ---")
-    # Note: host_proc is still running in the background. 
-    # Use host_proc.terminate() if you want to kill it at the end of the script.
+    print('--- tracker stdout ---')
+    print(tracker_result.stdout)
+    print('--- tracker stderr ---')
+    print(tracker_result.stderr)
+    print('---  ---')
+
+    # 7. Filter UT's stdout: any line whose content exactly matches a known
+    #    location name is in logic
+    in_logic = [
+        line.strip() for line in tracker_result.stdout.splitlines()
+        if line.strip() in location_names
+    ]
+
+    print("In logic list:")
+    for loc in in_logic:
+        print(loc)
+
+    # if tracker_result.stderr:
+    #     print("Tracker Errors:", tracker_result.stderr, file=sys.stderr)
+
+    host_proc.terminate()
+    # print("--- Done ---")
+
 
 if __name__ == "__main__":
     main()

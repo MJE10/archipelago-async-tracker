@@ -1,51 +1,28 @@
-FROM python:3.12-slim-bookworm
+FROM debian:bookworm-slim
 
-# 1. Install System Dependencies
-# Includes build tools for ModuleUpdate/speedups and 
-# graphics libs to satisfy Kivy's import checks.
+# System Python for in_container.py + curl for downloading AP release
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    zip \
+    python3 \
+    python3-pip \
     curl \
-    gcc \
-    g++ \
-    python3-dev \
-    libgl1 \
-    libmtdev1 \
-    libglib2.0-0 \
-    && apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# websocket-client needed by in_container.py
+RUN pip3 install websocket-client --break-system-packages
 
-# 2. Clone the repository
-RUN git clone https://github.com/ArchipelagoMW/Archipelago.git Archipelago
+# Download and extract official Archipelago 0.6.6 binary release
+RUN curl -L https://github.com/ArchipelagoMW/Archipelago/releases/download/0.6.6/Archipelago_0.6.6_linux-x86_64.tar.gz \
+    -o /tmp/ap.tar.gz \
+    && mkdir -p /opt/Archipelago \
+    && tar -xzf /tmp/ap.tar.gz -C /opt/Archipelago --strip-components=1 \
+    && rm /tmp/ap.tar.gz
 
-WORKDIR /app/Archipelago
+COPY in_container.py /opt/Archipelago/in_container.py
 
-# 3. Install Python requirements
-# We install these first to ensure ModuleUpdate has what it needs to run.
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir -r WebHostLib/requirements.txt && \
-    pip install --no-cache-dir "setuptools>=75,<81" "cx-Freeze==8.4.0" Cython
+VOLUME ["/opt/Archipelago/Players"]
+VOLUME ["/opt/Archipelago/custom_worlds"]
 
-# 4. Run ModuleUpdate
-# This is kept as requested to ensure all sub-dependencies are pulled in.
-RUN python ModuleUpdate.py -y
-
-# 5. Compile the Speedups
-# Running this after ModuleUpdate to ensure all logic-heavy components are optimized.
-RUN python setup.py build_ext --inplace
-
-# 6. Handle the 'world' folder
-# Copying the host's 'world' folder directly into the custom_tracker directory.
-COPY world /app/Archipelago/worlds/custom_tracker
-
-# 7. Setup Volumes and Environment
-VOLUME ["/app/Archipelago/Players"]
-VOLUME ["/app/Archipelago/custom_worlds"]
-
-# Prevents Kivy from trying to spawn a window and keeps the logs clean.
+# Prevents Kivy from trying to spawn a window
 ENV KIVY_NO_CONSOLELOG=1
 ENV KIVY_NO_FILELOG=1
 ENV KIVY_NO_ARGS=1
