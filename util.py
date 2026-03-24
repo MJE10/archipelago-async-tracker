@@ -191,7 +191,11 @@ def calculate_trackers(game, interesting_players):
             with open(data_dir.joinpath("location_names.json"), "w") as f:
                 json.dump(location_names, f)
 
-            result = get_logic_items(tmpdirname, player_name)
+            checks_done = set(player_data.get("checks_done", []))
+            name_to_id = data["location_name_to_id"]
+
+            raw_result = get_logic_items(tmpdirname, player_name)
+            result = [loc for loc in raw_result if name_to_id.get(loc) not in checks_done]
             in_logic[player_name] = result
 
             # 6. Store in Redis for 24 hours
