@@ -4,6 +4,7 @@ import json
 import time
 import redis
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from logic_tracker.run_logic import get_logic_items
 from pathlib import Path
 import hashlib
@@ -75,7 +76,7 @@ def get_api_cached(game, route, key, per_game=True, cache_timeout=None):
 
     redis_value = r.get(redis_key)
     if redis_value is not None:
-        print(f"CACHED {uri}")
+        # print(f"CACHED {uri}")
         return json.loads(str(redis_value))
 
     print(f"GET {uri}")
@@ -120,86 +121,89 @@ def clear_game_cache(game):
         r.delete(*all_keys)
         print(f"Wiped {len(all_keys)} keys for game {rid}")
 
+def calculate_player_logic(game, player_name, player_data, rid):
+    """Calculate in-logic locations for a single player. Returns (player_name, result_list)."""
+    # 1. Prepare data and generate hash
+    game_link = game.get("link", "")
+    items_received = sorted(player_data.get("items", []))
+
+    datapack = datapackage(game, player_data["index"])["location_name_to_id"]
+    missing_checks = sorted([
+        datapack[k] for k in datapack.keys()
+        if datapack[k] not in player_data.get("checks_done", [])
+    ])
+
+    hash_payload = {
+        "link": game_link,
+        "player": player_name,
+        "items": items_received,
+        "missing": missing_checks
+    }
+    state_hash = hashlib.sha256(json.dumps(hash_payload, sort_keys=True).encode()).hexdigest()
+
+    # 2. Hierarchical key: tracker:ROOM_ID:PLAYER_NAME:HASH
+    new_redis_key = f"tracker:{rid}:{player_name}:{state_hash}"
+
+    # 3. Check if this exact state is already cached
+    cached_logic = r.get(new_redis_key)
+    if cached_logic:
+        print(f"CACHED logic for {game['name']}/{player_name}")
+        return (player_name, json.loads(cached_logic))
+
+    # 4. Cache miss: remove any OLD logic hashes for this player
+    old_player_keys = list(r.scan_iter(f"tracker:{rid}:{player_name}:*"))
+    if old_player_keys:
+        r.delete(*old_player_keys)
+
+    # 5. Calculate logic (expensive — runs Docker)
+    path = Path(os.path.join("games", game["name"]))
+    if not os.path.exists(path):
+        return (player_name, [])
+
+    print(f"Generating new logic for {player_name}...")
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        dest_dir = Path(tmpdirname)
+        for yaml_file in path.glob('*.yaml'):
+            shutil.copy(yaml_file, dest_dir)
+
+        data_dir = dest_dir.joinpath("data")
+        os.mkdir(data_dir)
+
+        data = datapackage(game, player_data["index"])
+        id_to_name = {v: k for k, v in data["item_name_to_id"].items()}
+        item_names = [id_to_name[iid[0]] for iid in player_data["items"] if iid[0] in id_to_name]
+
+        location_names = list(data["location_name_to_id"].keys())
+
+        with open(data_dir.joinpath("item_names.json"), "w") as f:
+            json.dump(item_names, f)
+
+        with open(data_dir.joinpath("location_names.json"), "w") as f:
+            json.dump(location_names, f)
+
+        checks_done = set(player_data.get("checks_done", []))
+        name_to_id = data["location_name_to_id"]
+
+        raw_result = get_logic_items(tmpdirname, player_name)
+        result = [loc for loc in raw_result if name_to_id.get(loc) not in checks_done]
+
+        # 6. Store in Redis for 24 hours
+        r.set(new_redis_key, json.dumps(result), ex=86400)
+        return (player_name, result)
+
+
 def calculate_trackers(game, interesting_players):
     in_logic = {}
     rid = room_id(game)
 
-    for player_name in interesting_players:
-        player_data = interesting_players[player_name]
-        
-        # 1. Prepare data and generate hash
-        game_link = game.get("link", "")
-        items_received = sorted(player_data.get("items", []))
-        
-        datapack = datapackage(game, player_data["index"])["location_name_to_id"]
-        missing_checks = sorted([
-            datapack[k] for k in datapack.keys() 
-            if datapack[k] not in player_data.get("checks_done", [])
-        ])
-
-        hash_payload = {
-            "link": game_link,
-            "player": player_name,
-            "items": items_received,
-            "missing": missing_checks
+    with ThreadPoolExecutor() as executor:
+        futures = {
+            executor.submit(calculate_player_logic, game, player_name, player_data, rid): player_name
+            for player_name, player_data in interesting_players.items()
         }
-        state_hash = hashlib.sha256(json.dumps(hash_payload, sort_keys=True).encode()).hexdigest()
-        
-        # 2. Hierarchical key for targeted deletion
-        # Format: tracker:ROOM_ID:PLAYER_NAME:HASH
-        new_redis_key = f"tracker:{rid}:{player_name}:{state_hash}"
-
-        # 3. Check if this exact state is already cached
-        cached_logic = r.get(new_redis_key)
-        if cached_logic:
-            print(f"CACHED logic for {game["name"]}/{player_name}")
-            in_logic[player_name] = json.loads(cached_logic)
-            continue
-
-        # 4. Cache Miss: First, remove any OLD logic hashes for THIS player
-        # Since logic only moves forward, we don't need the old calculations
-        old_player_keys = list(r.scan_iter(f"tracker:{rid}:{player_name}:*"))
-        if old_player_keys:
-            r.delete(*old_player_keys)
-
-        # 5. Calculate logic (Expensive operation)
-        path = Path(os.path.join("games", game["name"]))
-        if not os.path.exists(path):
-            in_logic[player_name] = []
-            continue
-
-        print(f"Generating new logic for {player_name}...")
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            dest_dir = Path(tmpdirname)
-            for yaml_file in path.glob('*.yaml'):
-                shutil.copy(yaml_file, dest_dir)
-
-            data_dir = dest_dir.joinpath("data")
-            os.mkdir(data_dir)
-
-            # Build flat list of item names (with duplicates for multi-copies)
-            data = datapackage(game, player_data["index"])
-            id_to_name = {v: k for k, v in data["item_name_to_id"].items()}
-            item_names = [id_to_name[iid[0]] for iid in player_data["items"] if iid[0] in id_to_name]
-
-            # All valid location names for this player (used to filter UT output)
-            location_names = list(data["location_name_to_id"].keys())
-
-            with open(data_dir.joinpath("item_names.json"), "w") as f:
-                json.dump(item_names, f)
-
-            with open(data_dir.joinpath("location_names.json"), "w") as f:
-                json.dump(location_names, f)
-
-            checks_done = set(player_data.get("checks_done", []))
-            name_to_id = data["location_name_to_id"]
-
-            raw_result = get_logic_items(tmpdirname, player_name)
-            result = [loc for loc in raw_result if name_to_id.get(loc) not in checks_done]
+        for future in as_completed(futures):
+            player_name, result = future.result()
             in_logic[player_name] = result
-
-            # 6. Store in Redis for 24 hours
-            r.set(new_redis_key, json.dumps(result), ex=86400)
 
     print(f"All logic generation complete for {game['name']}")
     return in_logic

@@ -1,6 +1,7 @@
 import yaml
 from util import *
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, jsonify, send_from_directory
 
 app = Flask(__name__, static_folder='static')
@@ -83,20 +84,13 @@ def update_all_games():
     global ALL_GAME_RESULTS, REFRESH_TRACKERS, SUPER_REFRESH, REFRESH_ALL
     with open("games.yaml", 'r') as f:
         games = yaml.load(f, Loader=yaml.SafeLoader)
-        # print(json.dumps(games, indent=4))
 
     memory = {}
-    # if os.path.exists("memory.json"):
-    #     with open("memory.json", "r") as f:
-    #         memory = json.loads(f.read())
-    #     memory_keys = memory.keys()
-    #     for k in memory_keys:
-    #         if k not in games:
-    #             memory.pop(k)
-    
-    # any_updated = False
     all_results = {}
     index = 0
+    games_to_process = []
+
+    # First pass: setup result structure, clear caches, collect games to process
     for (name, game) in games.items():
         if name == "default":
             register_prop_defaults(game)
@@ -108,10 +102,6 @@ def update_all_games():
             clear_tracker_cache(game)
         if "link" in game and game["name"] in SUPER_REFRESH:
             clear_game_cache(game)
-        # if the tracker has not changed, then we don't need to continue
-        # if tracker_info_unchanged(game):
-        #     continue
-        # any_updated = True
         all_results[name] = {
             "index": index,
             "settings": game,
@@ -135,18 +125,25 @@ def update_all_games():
                         "items": {},
                         "locations": 0
                     }
-            per_player, game_checks_done, game_checks_total = process_game(name, game, memory[name])
+            games_to_process.append((name, game, memory[name]))
+
+    # Second pass: process all games in parallel
+    with ThreadPoolExecutor() as executor:
+        futures = {
+            executor.submit(process_game, name, game, mem): name
+            for (name, game, mem) in games_to_process
+        }
+        for future in as_completed(futures):
+            name = futures[future]
+            per_player, game_checks_done, game_checks_total = future.result()
             all_results[name]["players"] = per_player
             all_results[name]["game_checks_done"] = game_checks_done
             all_results[name]["game_checks_total"] = game_checks_total
+
     ALL_GAME_RESULTS = all_results
     REFRESH_TRACKERS = []
     SUPER_REFRESH = []
     REFRESH_ALL = False
-    
-    # if any_updated:
-    #     with open("memory.json", "w") as f:
-    #         f.write(json.dumps(memory))
 
 def process_game(name, game, memory):
     print(f"Now processing: {name}")
