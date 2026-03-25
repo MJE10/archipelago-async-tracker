@@ -14,6 +14,8 @@ def main():
     now = datetime.now()
     print(now.strftime("%Y/%m/%d %H:%M:%S"))
 
+    print("KIVY_NO_CONSOLELOG:", os.getenv('KIVY_NO_CONSOLELOG'), file=sys.stderr)
+
     parser = argparse.ArgumentParser(description="Archipelago Logic Runner")
     parser.add_argument("--name", default="MJE10_celeste", help="Player slot name")
     parser.add_argument("--port", type=int, default=38243, help="Port for the AP server")
@@ -31,11 +33,12 @@ def main():
 
     with open(items_file, "r") as f:
         item_names = json.load(f)
-        print(f"items: {item_names}")
+        print(f"items: {item_names[:10]}...")
 
     with open(locations_file, "r") as f:
-        location_names = set(json.load(f))
-        print(f"locations: {location_names}")
+        location_names = json.load(f)
+        print(f"locations: {location_names[:10]}...")
+        location_names = set(location_names)
 
     # 1. Copy custom worlds (tracker.apworld + any game worlds) into worlds/ so
     #    Generate can discover them
@@ -74,7 +77,7 @@ def main():
     ])
 
     # 4. Wait for server to come up, then connect via WebSocket
-    time.sleep(5)
+    time.sleep(10)
     ws_url = f"ws://localhost:{args.port}"
 
     try:

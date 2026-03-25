@@ -24,15 +24,21 @@ def get_logic_items(players_path, player_name, image_tag="asynctracker:latest"):
         )
 
         stdout = result.stdout
-        print(result.stdout)
-        print('---')
-        print(result.stderr)
+        # print(result.stdout)
+        # print('---')
+        # print(result.stderr)
         items = []
 
         if "In logic list:" in stdout:
             parts = stdout.split("In logic list:")
             raw_list = parts[1].strip().splitlines()
             items = [line.strip() for line in raw_list if line.strip()]
+        else:
+            error_output = f"Docker container exited without 'In logic list:' in stdout:\n{stdout}"
+            if result.stderr:
+                error_output += f"\nstderr:\n{result.stderr}"
+            print(error_output)
+            return (None, error_output)
 
         return (items, stdout)
 
