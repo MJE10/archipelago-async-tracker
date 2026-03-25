@@ -265,6 +265,12 @@
                 }
                 // ------------------------------
 
+                let fetchedAtHTML = '';
+                if (gameData.tracker_fetched_at) {
+                    const t = new Date(gameData.tracker_fetched_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit',hour12:true});
+                    fetchedAtHTML = `<span class="f-10 text-gray-600 font-mono mt-1.5">fetched ${t}</span>`;
+                }
+
                 if (SEARCH_QUERY && !matchesSearch(gameName) && playerHTML.trim() === "") continue;
 
                 const section = document.createElement('div');
@@ -291,9 +297,10 @@
                                 </div>
                             </div>
                             ${progressBarHTML}
+                            ${fetchedAtHTML}
                         </div>
                     </div>
-                    
+
                     <div class="collapse-wrapper">
                         <div class="collapse-inner p-4 bg-black/40 border-t border-white/5">
                             ${settings.description ? `<p class="f-12 text-gray-400 mb-6 leading-relaxed italic border-l-2 border-blue-500/40 pl-4">${settings.description}</p>` : ''}

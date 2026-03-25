@@ -175,6 +175,9 @@ def update_all_games():
             all_results[name]["game_checks_done"] = game_checks_done
             all_results[name]["game_checks_total"] = game_checks_total
 
+    for (name, game, _) in games_to_process:
+        all_results[name]["tracker_fetched_at"] = get_tracker_fetched_at(game)
+
     ALL_GAME_RESULTS = all_results
     REFRESH_TRACKERS = []
     SUPER_REFRESH = []

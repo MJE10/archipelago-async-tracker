@@ -94,7 +94,15 @@ def static_tracker(game):
     return get_api_cached(game, f'/static_tracker/{tracker_id(game)}', "static_tracker")
 
 def fetch_tracker(game):
-    return get_api_cached(game, f'/tracker/{tracker_id(game)}', "tracker", cache_timeout=game_prop(game, "tracker_refresh"))
+    key = redis_key_for(game, "tracker")
+    is_cached = r.get(key) is not None
+    data = get_api_cached(game, f'/tracker/{tracker_id(game)}', "tracker", cache_timeout=game_prop(game, "tracker_refresh"))
+    if not is_cached:
+        r.set(redis_key_for(game, "tracker_fetched_at"), datetime.now(timezone.utc).isoformat())
+    return data
+
+def get_tracker_fetched_at(game):
+    return r.get(redis_key_for(game, "tracker_fetched_at"))
 
 def tracker_info_unchanged(game):
     return r.get(redis_key_for(game, "tracker")) is not None
