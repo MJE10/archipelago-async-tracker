@@ -2,7 +2,8 @@ import yaml
 from util import *
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, send_from_directory, request
+from notifications import get_active_subscriptions, update_subscriptions, check_and_notify
 
 app = Flask(__name__, static_folder='static')
 app.json.sort_keys = False
@@ -54,6 +55,22 @@ def trigger_refresh_all():
         r.delete(key)
 
     return "Ok"
+
+@app.route('/notifications', methods=['GET'])
+def get_notifications():
+    return jsonify(get_active_subscriptions())
+
+@app.route('/notifications', methods=['POST'])
+def post_notifications():
+    data = request.json or {}
+    new_subs = data.get("subscriptions", {})
+    current_logic = {}
+    for game_name, game_data in ALL_GAME_RESULTS.items():
+        current_logic[game_name] = {}
+        for player_name, pdata in game_data.get("players", {}).items():
+            current_logic[game_name][player_name] = pdata.get("in_logic", [])
+    update_subscriptions(new_subs, current_logic)
+    return jsonify({"status": "ok"})
 
 @app.route('/super_refresh/<path:game_name>')
 def trigger_super_refresh(game_name):
@@ -144,6 +161,7 @@ def update_all_games():
     REFRESH_TRACKERS = []
     SUPER_REFRESH = []
     REFRESH_ALL = False
+    check_and_notify(ALL_GAME_RESULTS)
 
 def process_game(name, game, memory):
     print(f"Now processing: {name}")

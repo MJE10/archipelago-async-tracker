@@ -37,6 +37,9 @@
         
         .tab-btn { border-bottom: 2px solid transparent; transition: all 0.2s; }
         .tab-btn.active { border-color: #3b82f6; color: #3b82f6; background: rgba(59, 130, 246, 0.1); }
+
+        .notif-dur-btn.dur-active { background: #2563eb; color: white; border-color: #3b82f6; }
+        .notif-tree-cb { accent-color: #3b82f6; width: 15px; height: 15px; flex-shrink: 0; cursor: pointer; }
         
         /* Strict Font Size Definitions */
         .f-14 { font-size: 14px !important; }
@@ -62,6 +65,7 @@
                     </div>
                     <div class="flex gap-3">
                         <button onclick="collapseAll()" class="btn border border-gray-700 hover:bg-gray-800 px-4 py-2 f-12 font-bold text-gray-400 uppercase tracking-wider">Collapse All</button>
+                        <button onclick="openNotifModal()" class="btn border border-yellow-500/30 hover:bg-yellow-900/20 px-4 py-2 f-12 font-bold text-yellow-400 uppercase tracking-wider">🔔 Notify</button>
                         <button onclick="globalAction('refresh')" class="btn bg-blue-600 hover:bg-blue-500 px-4 py-2 f-12 font-bold text-white uppercase tracking-wider shadow-[0_0_20px_rgba(37,99,235,0.3)]">Refresh All</button>
                     </div>
                 </div>
@@ -79,12 +83,46 @@
         </div>
     </div>
 
+    <!-- Notification Modal -->
+    <div id="notif-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+        <div class="bg-[#16161a] border border-white/10 rounded-2xl w-full max-w-md flex flex-col shadow-2xl" style="max-height:82vh">
+            <div class="flex items-center justify-between p-5 border-b border-white/10 shrink-0">
+                <div class="flex items-center gap-3">
+                    <span class="text-yellow-400 text-lg">🔔</span>
+                    <h2 class="f-14 font-bold text-white">Push Notifications</h2>
+                </div>
+                <button onclick="closeNotifModal()" class="text-gray-500 hover:text-white transition-colors text-xl leading-none">✕</button>
+            </div>
+            <div class="overflow-y-auto flex-1 p-5" id="notif-player-list">
+                <div class="text-gray-600 f-12 italic text-center py-4">Loading...</div>
+            </div>
+            <div class="p-5 border-t border-white/10 space-y-3 shrink-0">
+                <div class="f-10 text-gray-500 uppercase tracking-widest font-bold">Notify until</div>
+                <div class="flex gap-2 flex-wrap">
+                    <button class="notif-dur-btn btn border border-white/10 hover:bg-white/5 px-3 py-1.5 f-12 font-bold text-gray-400" data-dur="1" onclick="selectDuration(1)">1 Hour</button>
+                    <button class="notif-dur-btn btn border border-white/10 hover:bg-white/5 px-3 py-1.5 f-12 font-bold text-gray-400" data-dur="2" onclick="selectDuration(2)">2 Hours</button>
+                    <button class="notif-dur-btn btn border border-white/10 hover:bg-white/5 px-3 py-1.5 f-12 font-bold text-gray-400" data-dur="3" onclick="selectDuration(3)">3 Hours</button>
+                    <button class="notif-dur-btn btn border border-white/10 hover:bg-white/5 px-3 py-1.5 f-12 font-bold text-gray-400" data-dur="custom" onclick="selectDuration('custom')">Custom</button>
+                </div>
+                <input type="datetime-local" id="notif-custom-dt" class="hidden w-full bg-black/60 border border-white/10 rounded-lg py-2 px-3 f-12 text-gray-200 focus:outline-none focus:border-blue-500">
+                <div id="notif-err" class="hidden f-12 text-red-400"></div>
+                <div class="flex gap-3">
+                    <button onclick="saveNotifications()" class="flex-1 btn bg-blue-600 hover:bg-blue-500 py-2.5 f-12 font-bold text-white uppercase tracking-wider">Save</button>
+                    <button onclick="clearAllNotifications()" class="btn border border-red-500/30 hover:bg-red-900/20 px-4 py-2.5 f-12 font-bold text-red-400 uppercase tracking-wider">Clear All</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         const STORAGE_PREFIX = "logic_v10_";
         const SEARCH_EL = document.getElementById('global-search');
         let CURRENT_DATA = {};
         let SEARCH_QUERY = "";
-        let PLAYER_TABS = {}; 
+        let PLAYER_TABS = {};
+        let NOTIF_STATE = {};       // {gameName: {playerName: {expires_at}}}
+        let NOTIF_CHECKED = {};     // {gameName: {playerName: bool}}
+        let NOTIF_DUR = null;       // null | 1 | 2 | 3 | 'custom'
 
         function formatActivityDate(gmtString) {
             if (!gmtString) return "No activity";
@@ -136,8 +174,9 @@
 
         async function fetchData() {
             try {
-                const response = await fetch('/games');
-                CURRENT_DATA = await response.json();
+                const [gamesRes, notifRes] = await Promise.all([fetch('/games'), fetch('/notifications')]);
+                CURRENT_DATA = await gamesRes.json();
+                NOTIF_STATE = await notifRes.json();
                 render();
             } catch (err) { }
         }
@@ -228,7 +267,8 @@
             return Object.entries(players).map(([playerName, pData]) => {
                 const playerId = `p_${btoa(gameName + playerName).replace(/[^a-z0-9]/gi, '')}`;
                 const activeTab = PLAYER_TABS[playerId] || 'locations';
-                const playerLink = pData.ut_link || "#"; 
+                const playerLink = pData.ut_link || "#";
+                const notifOn = hasNotification(gameName, playerName);
                 
                 const filteredLocs = (pData.in_logic || []).filter(loc => matchesSearch(loc));
                 const sortedItems = Object.entries(pData.items || {})
@@ -245,10 +285,13 @@
                         <div class="p-4 bg-white/5 cursor-pointer hover:bg-white/10 transition-colors" onclick="toggleCollapse('${playerId}')">
                             <div class="flex justify-between items-center mb-3">
                                 <div class="flex flex-col gap-0.5">
-                                    <a href="${playerLink}" onclick="event.stopPropagation()" class="font-bold f-14 text-blue-400 hover:text-blue-300 flex items-center gap-2 transition-colors">
-                                        ${playerName}
-                                        <svg class="w-4 h-4 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                    </a>
+                                    <div class="flex items-center gap-2">
+                                        <a href="${playerLink}" onclick="event.stopPropagation()" class="font-bold f-14 text-blue-400 hover:text-blue-300 flex items-center gap-2 transition-colors">
+                                            ${playerName}
+                                            <svg class="w-4 h-4 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                        </a>
+                                        ${notifOn ? '<span class="text-yellow-400 text-xs leading-none" title="Notifications active" onclick="event.stopPropagation(); openNotifModal()">🔔</span>' : ''}
+                                    </div>
                                     <span class="f-10 text-blue-400/90 font-bold tracking-tight">${formatActivityDate(pData.last_activity)}</span>
                                 </div>
                                 <div class="flex items-center justify-center f-12 font-mono text-gray-300 font-bold bg-black/50 px-3 py-1 rounded-md h-7 border border-white/10 shadow-inner">
@@ -291,6 +334,274 @@
         }
 
         function setPlayerTab(playerId, tab) { PLAYER_TABS[playerId] = tab; render(); }
+
+        // --- Notification helpers ---
+        function hasNotification(gameName, playerName) {
+            const sub = NOTIF_STATE?.[gameName]?.[playerName];
+            if (!sub?.expires_at) return false;
+            return new Date(sub.expires_at) > new Date();
+        }
+
+        function escAttr(s) {
+            return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function notifCheckedCount() {
+            let n = 0;
+            for (const players of Object.values(NOTIF_CHECKED))
+                for (const v of Object.values(players)) if (v) n++;
+            return n;
+        }
+
+        function openNotifModal() {
+            fetch('/notifications')
+                .then(r => r.json())
+                .then(data => {
+                    NOTIF_STATE = data;
+                    NOTIF_CHECKED = {};
+                    NOTIF_DUR = null;
+                    // Pre-check players with active subs
+                    for (const [g, players] of Object.entries(data)) {
+                        for (const [p, sub] of Object.entries(players)) {
+                            if (new Date(sub.expires_at) > new Date()) {
+                                if (!NOTIF_CHECKED[g]) NOTIF_CHECKED[g] = {};
+                                NOTIF_CHECKED[g][p] = true;
+                            }
+                        }
+                    }
+                    renderNotifModal();
+                    document.getElementById('notif-modal').classList.remove('hidden');
+                })
+                .catch(() => {
+                    renderNotifModal();
+                    document.getElementById('notif-modal').classList.remove('hidden');
+                });
+        }
+
+        function closeNotifModal() {
+            document.getElementById('notif-modal').classList.add('hidden');
+        }
+
+        function selectDuration(dur) {
+            NOTIF_DUR = dur;
+            document.querySelectorAll('.notif-dur-btn').forEach(btn => {
+                btn.classList.toggle('dur-active', btn.dataset.dur === String(dur));
+            });
+            document.getElementById('notif-custom-dt').classList.toggle('hidden', dur !== 'custom');
+            document.getElementById('notif-err').classList.add('hidden');
+        }
+
+        function updateNotifCount() {
+            const el = document.getElementById('notif-sel-count');
+            if (el) {
+                const n = notifCheckedCount();
+                el.textContent = `${n} player${n !== 1 ? 's' : ''} selected`;
+            }
+        }
+
+        function setAllNotifPlayers(checked) {
+            NOTIF_CHECKED = {};
+            if (checked) {
+                for (const [gName, gData] of Object.entries(CURRENT_DATA)) {
+                    if (!gData.players) continue;
+                    NOTIF_CHECKED[gName] = {};
+                    for (const pName of Object.keys(gData.players))
+                        NOTIF_CHECKED[gName][pName] = true;
+                }
+            }
+            renderNotifModal();
+        }
+
+        function setGameNotifPlayers(gameName, checked) {
+            const gData = CURRENT_DATA[gameName];
+            if (!gData?.players) return;
+            if (!NOTIF_CHECKED[gameName]) NOTIF_CHECKED[gameName] = {};
+            for (const pName of Object.keys(gData.players))
+                NOTIF_CHECKED[gameName][pName] = checked;
+            renderNotifModal();
+        }
+
+        function renderNotifModal() {
+            const container = document.getElementById('notif-player-list');
+            if (!container) return;
+
+            // Compute "all" checkbox state
+            let totalPlayers = 0, totalChecked = 0;
+            for (const [gName, gData] of Object.entries(CURRENT_DATA)) {
+                if (!gData.players) continue;
+                for (const pName of Object.keys(gData.players)) {
+                    totalPlayers++;
+                    if (NOTIF_CHECKED[gName]?.[pName]) totalChecked++;
+                }
+            }
+            const allChecked = totalPlayers > 0 && totalChecked === totalPlayers;
+            const allIndet = totalChecked > 0 && totalChecked < totalPlayers;
+
+            let html = `<div class="flex items-center justify-between mb-4 pb-3 border-b border-white/10">
+                <label class="flex items-center gap-3 cursor-pointer select-none">
+                    <input type="checkbox" id="notif-all-cb" class="notif-tree-cb"
+                           ${allChecked ? 'checked' : ''} onchange="setAllNotifPlayers(this.checked)">
+                    <span class="f-12 font-bold text-gray-300">All Players</span>
+                </label>
+                <span id="notif-sel-count" class="f-10 text-gray-500">${totalChecked} / ${totalPlayers} selected</span>
+            </div>`;
+
+            let hasAny = false;
+            for (const [gName, gData] of Object.entries(CURRENT_DATA)) {
+                const players = gData.players;
+                if (!players || Object.keys(players).length === 0) continue;
+                hasAny = true;
+
+                const gamePlayers = Object.keys(players);
+                const gameChecked = gamePlayers.filter(p => NOTIF_CHECKED[gName]?.[p]).length;
+                const gameAllOn = gameChecked === gamePlayers.length;
+
+                html += `<div class="mb-4">
+                    <label class="flex items-center gap-3 mb-1.5 cursor-pointer select-none">
+                        <input type="checkbox" class="notif-tree-cb notif-game-cb" data-game="${escAttr(gName)}"
+                               ${gameAllOn ? 'checked' : ''} onchange="setGameNotifPlayers('${escAttr(gName)}', this.checked)">
+                        <span class="f-11 font-bold text-gray-400 uppercase tracking-wider">${gName}</span>
+                    </label>`;
+
+                for (const pName of gamePlayers) {
+                    const isChecked = NOTIF_CHECKED[gName]?.[pName] === true;
+                    const sub = NOTIF_STATE?.[gName]?.[pName];
+                    let expLabel = '';
+                    if (sub?.expires_at) {
+                        const exp = new Date(sub.expires_at);
+                        if (exp > new Date()) {
+                            const diff = exp - new Date();
+                            const h = Math.floor(diff / 3600000);
+                            const m = Math.floor((diff % 3600000) / 60000);
+                            expLabel = `<span class="f-10 text-green-400/70 font-mono ml-auto">${h}h ${m}m left</span>`;
+                        }
+                    }
+                    html += `<label class="flex items-center gap-3 py-1.5 px-2 pl-7 rounded-lg hover:bg-white/5 cursor-pointer select-none">
+                        <input type="checkbox" class="notif-tree-cb notif-player-cb" data-game="${escAttr(gName)}" data-player="${escAttr(pName)}"
+                               ${isChecked ? 'checked' : ''} onchange="notifPlayerChange(this)">
+                        <span class="f-12 text-gray-300 flex-1">${pName}</span>
+                        ${expLabel}
+                    </label>`;
+                }
+                html += `</div>`;
+            }
+
+            if (!hasAny) html += '<div class="text-gray-600 f-12 italic text-center py-4">No players found.</div>';
+
+            container.innerHTML = html;
+
+            // Set indeterminate state on "all" checkbox
+            const allCb = document.getElementById('notif-all-cb');
+            if (allCb) allCb.indeterminate = allIndet;
+
+            // Set indeterminate on game checkboxes
+            container.querySelectorAll('.notif-game-cb').forEach(cb => {
+                const g = cb.dataset.game;
+                const gData = CURRENT_DATA[g];
+                if (!gData?.players) return;
+                const gamePlayers = Object.keys(gData.players);
+                const gc = gamePlayers.filter(p => NOTIF_CHECKED[g]?.[p]).length;
+                cb.indeterminate = gc > 0 && gc < gamePlayers.length;
+            });
+        }
+
+        function notifPlayerChange(el) {
+            const g = el.dataset.game;
+            const p = el.dataset.player;
+            if (!NOTIF_CHECKED[g]) NOTIF_CHECKED[g] = {};
+            NOTIF_CHECKED[g][p] = el.checked;
+            // Update game checkbox state
+            const gameCb = document.querySelector(`.notif-game-cb[data-game="${escAttr(g)}"]`);
+            if (gameCb) {
+                const gData = CURRENT_DATA[g];
+                if (gData?.players) {
+                    const total = Object.keys(gData.players).length;
+                    const checked = Object.keys(gData.players).filter(n => NOTIF_CHECKED[g]?.[n]).length;
+                    gameCb.checked = checked === total;
+                    gameCb.indeterminate = checked > 0 && checked < total;
+                }
+            }
+            // Update "all" checkbox
+            const allCb = document.getElementById('notif-all-cb');
+            if (allCb) {
+                let tp = 0, tc = 0;
+                for (const [gn, gd] of Object.entries(CURRENT_DATA)) {
+                    if (!gd.players) continue;
+                    for (const pn of Object.keys(gd.players)) { tp++; if (NOTIF_CHECKED[gn]?.[pn]) tc++; }
+                }
+                allCb.checked = tp > 0 && tc === tp;
+                allCb.indeterminate = tc > 0 && tc < tp;
+            }
+            updateNotifCount();
+        }
+
+        async function saveNotifications() {
+            const hasChecked = notifCheckedCount() > 0;
+            if (hasChecked && !NOTIF_DUR) {
+                const err = document.getElementById('notif-err');
+                err.textContent = 'Please select a duration.';
+                err.classList.remove('hidden');
+                return;
+            }
+            document.getElementById('notif-err').classList.add('hidden');
+
+            let expiresAt = null;
+            if (NOTIF_DUR === 'custom') {
+                const dtVal = document.getElementById('notif-custom-dt').value;
+                if (!dtVal) {
+                    const err = document.getElementById('notif-err');
+                    err.textContent = 'Please enter a date/time.';
+                    err.classList.remove('hidden');
+                    return;
+                }
+                expiresAt = new Date(dtVal).toISOString();
+            } else if (NOTIF_DUR) {
+                const exp = new Date();
+                exp.setHours(exp.getHours() + Number(NOTIF_DUR));
+                expiresAt = exp.toISOString();
+            }
+
+            const subscriptions = {};
+            if (expiresAt) {
+                for (const [gName, players] of Object.entries(NOTIF_CHECKED)) {
+                    for (const [pName, checked] of Object.entries(players)) {
+                        if (checked) {
+                            if (!subscriptions[gName]) subscriptions[gName] = {};
+                            subscriptions[gName][pName] = expiresAt;
+                        }
+                    }
+                }
+            }
+
+            try {
+                await fetch('/notifications', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ subscriptions })
+                });
+                NOTIF_STATE = await (await fetch('/notifications')).json();
+                render();
+                closeNotifModal();
+            } catch (e) {
+                const err = document.getElementById('notif-err');
+                err.textContent = 'Failed to save. Try again.';
+                err.classList.remove('hidden');
+            }
+        }
+
+        async function clearAllNotifications() {
+            try {
+                await fetch('/notifications', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ subscriptions: {} })
+                });
+                NOTIF_STATE = {};
+                render();
+                closeNotifModal();
+            } catch (e) { }
+        }
+
         fetchData();
         setInterval(fetchData, 60000);
     </script>
