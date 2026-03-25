@@ -34,11 +34,12 @@ def get_logic_items(players_path, player_name, image_tag="asynctracker:latest"):
             raw_list = parts[1].strip().splitlines()
             items = [line.strip() for line in raw_list if line.strip()]
 
-        return items
+        return (items, stdout)
 
     except subprocess.CalledProcessError as e:
-        print(f"Error running Docker: {e.stderr}")
-        return []
+        error_output = f"Docker error:\n{e.stderr}"
+        print(error_output)
+        return (None, error_output)
 
 
 # --- Usage Example ---
@@ -46,7 +47,7 @@ if __name__ == "__main__":
     path_to_players = "/home/michael/sync/ap/async-tracker/logic_tracker/Players"
     name = "MJE10_celeste"
 
-    logic_list = get_logic_items(path_to_players, name)
+    logic_list, _ = get_logic_items(path_to_players, name)
 
     print(f"Found {len(logic_list)} items in logic:")
     for item in logic_list:

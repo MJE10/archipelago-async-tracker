@@ -29,6 +29,24 @@ def get_games():
     """Returns the current state of ALL_GAME_RESULTS as JSON."""
     return jsonify(ALL_GAME_RESULTS)
 
+@app.route('/logic_log')
+def get_logic_log():
+    game_name = request.args.get('game')
+    player_name = request.args.get('player')
+    if not game_name or not player_name:
+        return jsonify({"error": "game and player params required"}), 400
+    with open("games.yaml", 'r') as f:
+        games = yaml.load(f, Loader=yaml.SafeLoader)
+    game = games.get(game_name)
+    if not game or "link" not in game:
+        return jsonify({"error": "game not found"}), 404
+    game["name"] = game_name
+    rid = room_id(game)
+    raw = r.get(f"tracker_log:{rid}:{player_name}")
+    if not raw:
+        return jsonify({"log": None, "calculated_at": None})
+    return jsonify(json.loads(raw))
+
 @app.route('/refresh_tracker/<path:game_name>')
 def trigger_refresh_tracker(game_name):
     """Adds a game to the queue to have its tracker JSON refreshed."""
@@ -247,8 +265,12 @@ def process_game(name, game, memory):
     in_logic = calculate_trackers(game, interesting_players)
     for player_name in in_logic:
         if player_name in per_player:
-            per_player[player_name]["in_logic"] = in_logic[player_name]
-    # print(in_logic)
+            result_dict = in_logic[player_name]
+            per_player[player_name]["in_logic"] = result_dict.get("in_logic", [])
+            per_player[player_name]["logic_calculated_at"] = result_dict.get("calculated_at")
+            logic_counts = dict(Counter(result_dict.get("item_names", [])))
+            gui_counts = per_player[player_name].get("items", {})
+            per_player[player_name]["logic_items_match"] = (logic_counts == gui_counts)
 
     return (per_player, game_checks_done, game_checks_total)
     # return {

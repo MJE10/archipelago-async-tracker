@@ -9,6 +9,8 @@ from logic_tracker.run_logic import get_logic_items
 from pathlib import Path
 import hashlib
 import shutil
+from datetime import datetime, timezone
+from collections import Counter
 
 IDX_ITEM_ITEM = 0
 IDX_ITEM_LOCATION = 1
@@ -150,15 +152,10 @@ def calculate_player_logic(game, player_name, player_data, rid):
         print(f"CACHED logic for {game['name']}/{player_name}")
         return (player_name, json.loads(cached_logic))
 
-    # 4. Cache miss: remove any OLD logic hashes for this player
-    old_player_keys = list(r.scan_iter(f"tracker:{rid}:{player_name}:*"))
-    if old_player_keys:
-        r.delete(*old_player_keys)
-
-    # 5. Calculate logic (expensive — runs Docker)
+    # 4. Calculate logic (expensive — runs Docker)
     path = Path(os.path.join("games", game["name"]))
     if not os.path.exists(path):
-        return (player_name, [])
+        return (player_name, {"in_logic": [], "calculated_at": None, "item_names": []})
 
     print(f"Generating new logic for {player_name}...")
     with tempfile.TemporaryDirectory() as tmpdirname:
@@ -184,12 +181,32 @@ def calculate_player_logic(game, player_name, player_data, rid):
         checks_done = set(player_data.get("checks_done", []))
         name_to_id = data["location_name_to_id"]
 
-        raw_result = get_logic_items(tmpdirname, player_name)
-        result = [loc for loc in raw_result if name_to_id.get(loc) not in checks_done]
+        raw_result, docker_stdout = get_logic_items(tmpdirname, player_name)
 
-        # 6. Store in Redis for 24 hours
-        r.set(new_redis_key, json.dumps(result), ex=86400)
-        return (player_name, result)
+        if raw_result is not None:
+            # 5. Docker succeeded: build result, delete old keys, store new entry
+            result = [loc for loc in raw_result if name_to_id.get(loc) not in checks_done]
+            calculated_at = datetime.now(timezone.utc).isoformat()
+            result_dict = {"in_logic": result, "calculated_at": calculated_at, "item_names": item_names}
+
+            old_player_keys = list(r.scan_iter(f"tracker:{rid}:{player_name}:*"))
+            if old_player_keys:
+                r.delete(*old_player_keys)
+
+            r.set(new_redis_key, json.dumps(result_dict), ex=86400)
+
+            log_key = f"tracker_log:{rid}:{player_name}"
+            r.set(log_key, json.dumps({"log": docker_stdout, "calculated_at": calculated_at}), ex=86400)
+
+            return (player_name, result_dict)
+        else:
+            # 6. Docker failed: return any stale cached entry if available
+            old_player_keys = list(r.scan_iter(f"tracker:{rid}:{player_name}:*"))
+            if old_player_keys:
+                stale_data = r.get(old_player_keys[0])
+                if stale_data:
+                    return (player_name, json.loads(stale_data))
+            return (player_name, {"in_logic": [], "calculated_at": None, "item_names": []})
 
 
 def calculate_trackers(game, interesting_players):

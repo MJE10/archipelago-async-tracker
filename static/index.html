@@ -64,6 +64,10 @@
                         </a>
                         <a href="logic-edit://open" class="hidden md:inline-block f-12 text-blue-400/70 hover:text-blue-400 transition-colors border border-blue-500/20 px-3 py-1 rounded-full uppercase font-bold tracking-widest bg-blue-500/5">Edit Config</a>
                     </div>
+                    <div class="flex items-center gap-1.5 f-10 text-gray-600 font-mono">
+                        <i class="ph ph-pulse"></i>
+                        <span id="last-received-ts">--</span>
+                    </div>
                     <div class="flex gap-3">
                         <button onclick="collapseAll()" class="btn border border-gray-700 hover:bg-gray-800 px-3 py-2 f-12 font-bold text-gray-400 uppercase tracking-wider" title="Collapse All">
                             <i class="ph ph-arrows-in text-lg md:hidden"></i>
@@ -124,6 +128,19 @@
         </div>
     </div>
 
+    <!-- Log Modal -->
+    <div id="log-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+        <div class="bg-[#16161a] border border-white/10 rounded-2xl w-full max-w-3xl flex flex-col shadow-2xl" style="max-height:85vh">
+            <div class="flex items-center justify-between p-5 border-b border-white/10 shrink-0">
+                <h2 class="f-14 font-bold text-white" id="log-modal-title">Docker Log</h2>
+                <button onclick="closeLogModal()" class="text-gray-500 hover:text-white transition-colors text-xl leading-none">✕</button>
+            </div>
+            <div class="overflow-y-auto flex-1 p-5" id="log-modal-body">
+                <div class="f-12 text-gray-600 italic text-center py-4">Loading...</div>
+            </div>
+        </div>
+    </div>
+
     <script>
         const STORAGE_PREFIX = "logic_v10_";
         const SEARCH_EL = document.getElementById('global-search');
@@ -133,6 +150,8 @@
         let NOTIF_STATE = {};       // {gameName: {playerName: {expires_at}}}
         let NOTIF_CHECKED = {};     // {gameName: {playerName: bool}}
         let NOTIF_DUR = null;       // null | 1 | 2 | 3 | 'custom'
+        let LAST_RECEIVED_AT = null;
+        let LAST_FETCH_ERROR = false;
 
         function formatActivityDate(gmtString) {
             if (!gmtString) return "No activity";
@@ -182,13 +201,24 @@
             } catch (e) { return null; }
         }
 
+        function formatLastReceived() {
+            if (LAST_FETCH_ERROR) return '<span class="text-red-400 font-bold">Connection error</span>';
+            if (!LAST_RECEIVED_AT) return '<span class="text-gray-600">--</span>';
+            return `<span class="text-gray-500">${LAST_RECEIVED_AT.toLocaleTimeString([], {hour:'numeric',minute:'2-digit',hour12:true})}</span>`;
+        }
+
         async function fetchData() {
             try {
                 const [gamesRes, notifRes] = await Promise.all([fetch('/games'), fetch('/notifications')]);
                 CURRENT_DATA = await gamesRes.json();
                 NOTIF_STATE = await notifRes.json();
+                LAST_RECEIVED_AT = new Date();
+                LAST_FETCH_ERROR = false;
                 render();
-            } catch (err) { }
+            } catch (err) {
+                LAST_FETCH_ERROR = true;
+                render();
+            }
         }
 
         async function globalAction(action) {
@@ -210,6 +240,8 @@
             const container = document.getElementById('game-container');
             if (!container) return;
             container.innerHTML = "";
+            const tsEl = document.getElementById('last-received-ts');
+            if (tsEl) tsEl.innerHTML = formatLastReceived();
 
             for (const [gameName, gameData] of Object.entries(CURRENT_DATA)) {
                 const settings = gameData.settings || {};
@@ -312,6 +344,20 @@
                                 <div class="bg-gradient-to-r from-green-600 to-green-400 h-full shadow-[0_0_10px_rgba(34,197,94,0.4)]" style="width: ${donePct}%"></div>
                                 <div class="bg-gradient-to-r from-yellow-600 to-yellow-400 h-full" style="width: ${doablePct}%"></div>
                             </div>
+                            ${(() => {
+                                if (!pData.logic_calculated_at) return '';
+                                const t = new Date(pData.logic_calculated_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit',hour12:true});
+                                const matchIcon = pData.logic_items_match
+                                    ? '<span class="text-green-400 font-bold" title="Items match logic calculation">✓</span>'
+                                    : '<span class="text-red-400 font-bold" title="Items differ from logic calculation — recalculating">✗</span>';
+                                return `<div class="flex items-center gap-3 mt-2 pt-2 border-t border-white/5" onclick="event.stopPropagation()">
+                                    <span class="f-10 text-gray-600 uppercase tracking-widest font-bold">Logic</span>
+                                    <span class="f-10 text-gray-500 font-mono">${t}</span>
+                                    <span class="f-12">${matchIcon}</span>
+                                    <button class="ml-auto btn border border-white/10 hover:bg-white/10 px-2 py-0.5 f-10 font-bold text-gray-500 uppercase tracking-wider"
+                                        onclick="event.stopPropagation();openLogModal('${escAttr(gameName)}','${escAttr(playerName)}')">Log</button>
+                                </div>`;
+                            })()}
                         </div>
 
                         <div class="collapse-wrapper">
@@ -610,6 +656,30 @@
                 render();
                 closeNotifModal();
             } catch (e) { }
+        }
+
+        async function openLogModal(gameName, playerName) {
+            document.getElementById('log-modal-title').textContent = `Docker Log — ${playerName}`;
+            document.getElementById('log-modal-body').innerHTML = '<div class="f-12 text-gray-600 italic text-center py-4">Loading...</div>';
+            document.getElementById('log-modal').classList.remove('hidden');
+            try {
+                const res = await fetch(`/logic_log?game=${encodeURIComponent(gameName)}&player=${encodeURIComponent(playerName)}`);
+                const data = await res.json();
+                if (!data.log) {
+                    document.getElementById('log-modal-body').innerHTML = '<div class="f-12 text-gray-600 italic text-center py-4">No log available.</div>';
+                    return;
+                }
+                const ts = data.calculated_at ? new Date(data.calculated_at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit',hour12:true}) : null;
+                const tsLine = ts ? `<div class="f-10 text-gray-600 mb-3 font-mono">Calculated at ${ts}</div>` : '';
+                const escaped = data.log.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                document.getElementById('log-modal-body').innerHTML = `${tsLine}<pre class="f-10 text-gray-400 whitespace-pre-wrap font-mono leading-relaxed">${escaped}</pre>`;
+            } catch {
+                document.getElementById('log-modal-body').innerHTML = '<div class="f-12 text-red-400 italic text-center py-4">Failed to load log.</div>';
+            }
+        }
+
+        function closeLogModal() {
+            document.getElementById('log-modal').classList.add('hidden');
         }
 
         fetchData();
