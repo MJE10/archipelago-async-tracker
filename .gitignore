@@ -4,3 +4,4 @@ games
 __pycache__
 custom_worlds/
 todo.txt
+notifications.json

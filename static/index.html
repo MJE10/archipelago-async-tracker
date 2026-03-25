@@ -6,6 +6,7 @@
     <title>Logic Tracker</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/regular/style.css">
     <style>
         body { background-color: #0a0a0c; color: #e5e7eb; font-family: 'Inter', sans-serif; overflow-x: hidden; }
         .card { 
@@ -64,9 +65,18 @@
                         <a href="logic-edit://open" class="hidden md:inline-block f-12 text-blue-400/70 hover:text-blue-400 transition-colors border border-blue-500/20 px-3 py-1 rounded-full uppercase font-bold tracking-widest bg-blue-500/5">Edit Config</a>
                     </div>
                     <div class="flex gap-3">
-                        <button onclick="collapseAll()" class="btn border border-gray-700 hover:bg-gray-800 px-4 py-2 f-12 font-bold text-gray-400 uppercase tracking-wider">Collapse All</button>
-                        <button onclick="openNotifModal()" class="btn border border-yellow-500/30 hover:bg-yellow-900/20 px-4 py-2 f-12 font-bold text-yellow-400 uppercase tracking-wider">🔔 Notify</button>
-                        <button onclick="globalAction('refresh')" class="btn bg-blue-600 hover:bg-blue-500 px-4 py-2 f-12 font-bold text-white uppercase tracking-wider shadow-[0_0_20px_rgba(37,99,235,0.3)]">Refresh All</button>
+                        <button onclick="collapseAll()" class="btn border border-gray-700 hover:bg-gray-800 px-3 py-2 f-12 font-bold text-gray-400 uppercase tracking-wider" title="Collapse All">
+                            <i class="ph ph-arrows-in text-lg md:hidden"></i>
+                            <span class="hidden md:inline">Collapse All</span>
+                        </button>
+                        <button onclick="openNotifModal()" class="btn border border-yellow-500/30 hover:bg-yellow-900/20 px-3 py-2 f-12 font-bold text-yellow-400 uppercase tracking-wider" title="Notify">
+                            <i class="ph ph-bell-ringing text-lg md:hidden"></i>
+                            <span class="hidden md:inline">🔔 Notify</span>
+                        </button>
+                        <button onclick="globalAction('refresh')" class="btn bg-blue-600 hover:bg-blue-500 px-3 py-2 f-12 font-bold text-white uppercase tracking-wider shadow-[0_0_20px_rgba(37,99,235,0.3)]" title="Refresh All">
+                            <i class="ph ph-arrow-clockwise text-lg md:hidden"></i>
+                            <span class="hidden md:inline">Refresh All</span>
+                        </button>
                     </div>
                 </div>
 
