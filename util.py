@@ -88,7 +88,7 @@ def get_api_cached(game, route, key, per_game=True, cache_timeout=None):
     return data
 
 def room_status(game):
-    return get_api_cached(game, f'/room_status/{room_id(game)}', "room_status")
+    return get_api_cached(game, f'/room_status/{room_id(game)}', "room_status", cache_timeout=600)
 
 def static_tracker(game):
     return get_api_cached(game, f'/static_tracker/{tracker_id(game)}', "static_tracker")
