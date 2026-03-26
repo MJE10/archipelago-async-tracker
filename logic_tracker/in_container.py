@@ -141,9 +141,10 @@ def main():
 
     # 7. Filter UT's stdout: any line whose content exactly matches a known
     #    location name is in logic
+    location_names = [l.split('(')[0].strip() for l in location_names]
     in_logic = [
-        line.strip() for line in tracker_result.stdout.splitlines()
-        if line.strip() in location_names
+        line.split('(')[0].strip() for line in tracker_result.stdout.splitlines()
+        if line.split('(')[0].strip() in location_names
     ]
 
     print("In logic list:")
