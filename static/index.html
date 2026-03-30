@@ -267,8 +267,18 @@
 
                 let fetchedAtHTML = '';
                 if (gameData.tracker_fetched_at) {
-                    const t = new Date(gameData.tracker_fetched_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit',hour12:true});
-                    fetchedAtHTML = `<span class="f-10 text-gray-600 font-mono mt-1.5">fetched ${t}</span>`;
+                    const fetchedDate = new Date(gameData.tracker_fetched_at);
+                    const t = fetchedDate.toLocaleTimeString([], {hour:'numeric',minute:'2-digit',hour12:true});
+                    const ageMs = Date.now() - fetchedDate.getTime();
+                    const isStale = ageMs > 60 * 60 * 1000;
+                    if (isStale) {
+                        const ageHours = Math.floor(ageMs / (60 * 60 * 1000));
+                        const ageMins = Math.floor((ageMs % (60 * 60 * 1000)) / 60000);
+                        const ageStr = ageHours > 0 ? `${ageHours}h ${ageMins}m ago` : `${ageMins}m ago`;
+                        fetchedAtHTML = `<span class="f-10 font-mono mt-1.5 text-yellow-400/80 flex items-center gap-1"><i class="ph ph-warning"></i>fetched ${t} (${ageStr})</span>`;
+                    } else {
+                        fetchedAtHTML = `<span class="f-10 text-gray-600 font-mono mt-1.5">fetched ${t}</span>`;
+                    }
                 }
 
                 if (SEARCH_QUERY && !matchesSearch(gameName) && playerHTML.trim() === "") continue;
