@@ -1,4 +1,5 @@
 import yaml
+import argparse
 from util import *
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -7,6 +8,8 @@ from notifications import get_active_subscriptions, update_subscriptions, check_
 
 app = Flask(__name__, static_folder='static')
 app.json.sort_keys = False
+
+GAMES_YAML = "games.yaml"
 
 ALL_GAME_RESULTS = {}
 REFRESH_TRACKERS = []
@@ -35,14 +38,14 @@ def get_logic_log():
     player_name = request.args.get('player')
     if not game_name or not player_name:
         return jsonify({"error": "game and player params required"}), 400
-    with open("games.yaml", 'r') as f:
+    with open(GAMES_YAML, 'r') as f:
         games = yaml.load(f, Loader=yaml.SafeLoader)
     game = games.get(game_name)
     if not game or "link" not in game:
         return jsonify({"error": "game not found"}), 404
     game["name"] = game_name
     rid = room_id(game)
-    raw = r.get(f"tracker_log:{rid}:{player_name}")
+    raw = r.get(f"{REDIS_PREFIX}:{rid}:logic_log:{player_name}")
     if not raw:
         return jsonify({"log": None, "calculated_at": None})
     return jsonify(json.loads(raw))
@@ -69,7 +72,7 @@ def trigger_refresh_all():
     REFRESH_ALL = True
     
     update_all_games()
-    for key in r.scan_iter("tracker:*"):
+    for key in r.scan_iter(f"{REDIS_PREFIX}:*:logic:*"):
         r.delete(key)
 
     return "Ok"
@@ -109,15 +112,15 @@ def trigger_super_refresh(game_name):
 def background_update_loop():
     """Runs the infinite loop in a separate thread."""
     while True:
-        try:
-            update_all_games()
-        except Exception as e:
-            print(f"Error in update loop: {e}")
+        # try:
+        update_all_games()
+        # except Exception as e:
+        #     print(f"Error in update loop: {e}")
         time.sleep(30)
 
 def update_all_games():
     global ALL_GAME_RESULTS, REFRESH_TRACKERS, SUPER_REFRESH, REFRESH_ALL
-    with open("games.yaml", 'r') as f:
+    with open(GAMES_YAML, 'r') as f:
         games = yaml.load(f, Loader=yaml.SafeLoader)
 
     memory = {}
@@ -199,7 +202,7 @@ def process_game(name, game, memory):
     # Determine what has changed
     per_player = {}
     for player in room_status(game)["players"]:
-        if player[0] in game_prop(game, "players"):
+        if player[0] in game_prop(game, "players") or len(game_prop(game, "players")) == 0:
             per_player[player[0]] = {
                 "ut_link": f"ut://{api_path(game).split("://")[1]}:{room["last_port"]}/{player[0]}/{str(game_prop(game, "password"))}",
                 "in_logic": [],
@@ -233,7 +236,7 @@ def process_game(name, game, memory):
     for (p, player) in enumerate(tracker["player_items_received"]):
         player_name = player_idx_to_name(game, p)
         data = datapackage(game, p)
-        if player_name in game_prop(game, "players"):
+        if player_name in game_prop(game, "players") or len(game_prop(game, "players")) == 0:
             interesting_players[player_name] = {"index": p, "items": player["items"], "checks_done": []}
         gui_items = {}
         for item in player["items"]:
@@ -287,10 +290,20 @@ def process_game(name, game, memory):
 
 
 if __name__ == "__main__":
-    # 2. Start the background thread
+    parser = argparse.ArgumentParser()
+    parser.add_argument("config", nargs="?", default="games.yaml", help="Path to games yaml config file")
+    args = parser.parse_args()
+
+    GAMES_YAML = args.config
+
+    with open(GAMES_YAML, 'r') as f:
+        config = yaml.load(f, Loader=yaml.SafeLoader)
+    defaults = config.get("default", {}) or {}
+    port = defaults.get("port", 5151)
+    redis_prefix = defaults.get("redis_prefix", "ap2")
+    set_redis_prefix(redis_prefix)
+
     update_thread = threading.Thread(target=background_update_loop, daemon=True)
     update_thread.start()
 
-    # 3. Start the Flask server
-    # host='0.0.0.0' makes it accessible on your local network
-    app.run(host='0.0.0.0', port=5151)
+    app.run(host='0.0.0.0', port=port)

@@ -27,6 +27,10 @@ r = redis.Redis(
 
 REDIS_PREFIX = "ap"
 
+def set_redis_prefix(prefix):
+    global REDIS_PREFIX
+    REDIS_PREFIX = prefix
+
 PROPS_DEFAULTS = {}
 
 def register_prop_defaults(props):
@@ -121,12 +125,7 @@ def clear_tracker_cache(game):
 def clear_game_cache(game):
     """Deletes all cached information associated with a specific room ID."""
     rid = room_id(game)
-    # Clear general API cache (prefixed with ap:room_id)
-    api_keys = list(r.scan_iter(f"{REDIS_PREFIX}:{rid}:*"))
-    # Clear logic tracker cache (prefixed with tracker:room_id)
-    logic_keys = list(r.scan_iter(f"tracker:{rid}:*"))
-    
-    all_keys = api_keys + logic_keys
+    all_keys = list(r.scan_iter(f"{REDIS_PREFIX}:{rid}:*"))
     if all_keys:
         r.delete(*all_keys)
         print(f"Wiped {len(all_keys)} keys for game {rid}")
@@ -151,8 +150,8 @@ def calculate_player_logic(game, player_name, player_data, rid):
     }
     state_hash = hashlib.sha256(json.dumps(hash_payload, sort_keys=True).encode()).hexdigest()
 
-    # 2. Hierarchical key: tracker:ROOM_ID:PLAYER_NAME:HASH
-    new_redis_key = f"tracker:{rid}:{player_name}:{state_hash}"
+    # 2. Hierarchical key: REDIS_PREFIX:ROOM_ID:logic:PLAYER_NAME:HASH
+    new_redis_key = f"{REDIS_PREFIX}:{rid}:logic:{player_name}:{state_hash}"
 
     # 3. Check if this exact state is already cached
     cached_logic = r.get(new_redis_key)
@@ -197,19 +196,19 @@ def calculate_player_logic(game, player_name, player_data, rid):
             calculated_at = datetime.now(timezone.utc).isoformat()
             result_dict = {"in_logic": result, "calculated_at": calculated_at, "item_names": item_names}
 
-            old_player_keys = list(r.scan_iter(f"tracker:{rid}:{player_name}:*"))
+            old_player_keys = list(r.scan_iter(f"{REDIS_PREFIX}:{rid}:logic:{player_name}:*"))
             if old_player_keys:
                 r.delete(*old_player_keys)
 
             r.set(new_redis_key, json.dumps(result_dict), ex=86400)
 
-            log_key = f"tracker_log:{rid}:{player_name}"
+            log_key = f"{REDIS_PREFIX}:{rid}:logic_log:{player_name}"
             r.set(log_key, json.dumps({"log": docker_stdout, "calculated_at": calculated_at}), ex=86400)
 
             return (player_name, result_dict)
         else:
             # 6. Docker failed: return any stale cached entry if available
-            old_player_keys = list(r.scan_iter(f"tracker:{rid}:{player_name}:*"))
+            old_player_keys = list(r.scan_iter(f"{REDIS_PREFIX}:{rid}:logic:{player_name}:*"))
             if old_player_keys:
                 stale_data = r.get(old_player_keys[0])
                 if stale_data:

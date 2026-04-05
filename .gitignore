@@ -1,5 +1,6 @@
 data
 games.yaml
+*.yaml
 games
 __pycache__
 custom_worlds/
