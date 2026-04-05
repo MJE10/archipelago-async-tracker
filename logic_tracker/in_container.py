@@ -50,6 +50,8 @@ def main():
         slot_number = slot_data_info["slot"]
         slot_data = slot_data_info["data"]
         slot_game = slot_data_info.get("game", "")
+        if slot_game == "":
+            print("slot game missing")
         preview = str(slot_data)[:200]
         print(f"slot_data (slot {slot_number}, game {slot_game}): {preview}...")
 
@@ -105,7 +107,7 @@ def main():
             "name": args.name,
             "items_handling": 0,
             "version": {"major": 0, "minor": 6, "build": 6, "class": "Version"},
-            "tags": [],
+            "tags": [] if slot_game != "" else ["TextOnly"],
             "slot_data": False,
         }]
         ws.send(json.dumps(connect_msg))
