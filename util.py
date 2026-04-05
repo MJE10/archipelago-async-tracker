@@ -136,6 +136,7 @@ def slot_data_for_game(game):
         return get_api_cached(game, f'/slot_data_tracker/{tracker_id(game)}', "slot_data", cache_timeout=86400)
     except Exception as e:
         print(f"Failed to fetch slot data for {room_id(game)}: {e}")
+        r.set(redis_key_for(game, "slot_data"), json.dumps([]), ex=86400)
         return []
 
 def get_player_slot_data(game, player_index):
