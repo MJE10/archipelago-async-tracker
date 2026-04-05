@@ -195,8 +195,9 @@ def calculate_player_logic(game, player_name, player_data, rid):
 
         if player_slot_data is not None:
             slot_number = player_data["index"] + 1
+            player_game = room_status(game)["players"][player_data["index"]][1]
             with open(data_dir.joinpath("slot_data.json"), "w") as f:
-                json.dump({"slot": slot_number, "data": player_slot_data}, f)
+                json.dump({"slot": slot_number, "data": player_slot_data, "game": player_game}, f)
 
         data = datapackage(game, player_data["index"])
         id_to_name = {v: k for k, v in data["item_name_to_id"].items()}

@@ -43,13 +43,15 @@ def main():
 
     slot_number = None
     slot_data = None
+    slot_game = ""
     if os.path.exists(slot_data_file):
         with open(slot_data_file, "r") as f:
             slot_data_info = json.load(f)
         slot_number = slot_data_info["slot"]
         slot_data = slot_data_info["data"]
+        slot_game = slot_data_info.get("game", "")
         preview = str(slot_data)[:200]
-        print(f"slot_data (slot {slot_number}): {preview}...")
+        print(f"slot_data (slot {slot_number}, game {slot_game}): {preview}...")
 
     # 1. Copy custom worlds (tracker.apworld + any game worlds) into worlds/ so
     #    Generate can discover them
@@ -98,12 +100,12 @@ def main():
         connect_msg = [{
             "cmd": "Connect",
             "password": "",
-            "game": "",
+            "game": slot_game,
             "uuid": "1234",
             "name": args.name,
             "items_handling": 0,
             "version": {"major": 0, "minor": 6, "build": 6, "class": "Version"},
-            "tags": ["TextOnly"],
+            "tags": [],
             "slot_data": False,
         }]
         ws.send(json.dumps(connect_msg))
