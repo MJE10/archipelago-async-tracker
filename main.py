@@ -44,8 +44,7 @@ def get_logic_log():
     if not game or "link" not in game:
         return jsonify({"error": "game not found"}), 404
     game["name"] = game_name
-    rid = room_id(game)
-    raw = r.get(f"{REDIS_PREFIX}:{rid}:logic_log:{player_name}")
+    raw = r.get(redis_key_for(game, f"logic_log:{player_name}"))
     if not raw:
         return jsonify({"log": None, "calculated_at": None})
     return jsonify(json.loads(raw))
