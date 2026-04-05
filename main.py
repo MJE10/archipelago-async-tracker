@@ -109,10 +109,10 @@ def trigger_super_refresh(game_name):
 def background_update_loop():
     """Runs the infinite loop in a separate thread."""
     while True:
-        # try:
-        update_all_games()
-        # except Exception as e:
-        #     print(f"Error in update loop: {e}")
+        try:
+            update_all_games()
+        except Exception as e:
+            print(f"Error in update loop: {e}")
         time.sleep(30)
 
 def update_all_games():

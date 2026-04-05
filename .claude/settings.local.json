@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/tmp/tree_output.txt:*)",
+      "Read(//tmp/**)"
+    ]
+  }
+}
