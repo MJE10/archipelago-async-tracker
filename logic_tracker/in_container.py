@@ -151,6 +151,7 @@ def main():
     print(f"--- Running Universal Tracker for {args.name} ---")
     tracker_result = subprocess.run(
         [
+            "xvfb-run", "-a", "-s", "-screen 0 1024x768x24",
             launcher_path, "Universal Tracker", "--",
             "--name", args.name,
             "--list",

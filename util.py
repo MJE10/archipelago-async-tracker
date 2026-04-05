@@ -19,7 +19,8 @@ IDX_ITEM_FLAGS = 3
 
 session = requests.Session()
 r = redis.Redis(
-    host='100.109.133.47', 
+    # host='100.109.133.47', 
+    host='127.0.0.1', 
     port=6379, 
     # password='your_strong_password',
     decode_responses=True
