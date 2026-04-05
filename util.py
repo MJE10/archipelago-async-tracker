@@ -130,6 +130,22 @@ def clear_game_cache(game):
         r.delete(*all_keys)
         print(f"Wiped {len(all_keys)} keys for game {rid}")
 
+def slot_data_for_game(game):
+    """Fetches slot data for all players in a game, cached for 24 hours. Returns [] on failure."""
+    try:
+        return get_api_cached(game, f'/slot_data_tracker/{tracker_id(game)}', "slot_data", cache_timeout=86400)
+    except Exception as e:
+        print(f"Failed to fetch slot data for {room_id(game)}: {e}")
+        return []
+
+def get_player_slot_data(game, player_index):
+    """Returns the slot_data dict for a player (0-indexed), or None if unavailable."""
+    all_slot_data = slot_data_for_game(game)
+    for entry in all_slot_data:
+        if entry.get("player") == player_index + 1:
+            return entry.get("slot_data", {})
+    return None
+
 def calculate_player_logic(game, player_name, player_data, rid):
     """Calculate in-logic locations for a single player. Returns (player_name, result_list)."""
     # 1. Prepare data and generate hash
@@ -142,11 +158,14 @@ def calculate_player_logic(game, player_name, player_data, rid):
         if datapack[k] not in player_data.get("checks_done", [])
     ])
 
+    player_slot_data = get_player_slot_data(game, player_data["index"])
+
     hash_payload = {
         "link": game_link,
         "player": player_name,
         "items": items_received,
-        "missing": missing_checks
+        "missing": missing_checks,
+        "slot_data": player_slot_data,
     }
     state_hash = hashlib.sha256(json.dumps(hash_payload, sort_keys=True).encode()).hexdigest()
 
@@ -172,6 +191,11 @@ def calculate_player_logic(game, player_name, player_data, rid):
 
         data_dir = dest_dir.joinpath("data")
         os.mkdir(data_dir)
+
+        if player_slot_data is not None:
+            slot_number = player_data["index"] + 1
+            with open(data_dir.joinpath("slot_data.json"), "w") as f:
+                json.dump({"slot": slot_number, "data": player_slot_data}, f)
 
         data = datapackage(game, player_data["index"])
         id_to_name = {v: k for k, v in data["item_name_to_id"].items()}

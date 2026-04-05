@@ -30,6 +30,7 @@ def main():
 
     items_file = os.path.join(players_path, "data", "item_names.json")
     locations_file = os.path.join(players_path, "data", "location_names.json")
+    slot_data_file = os.path.join(players_path, "data", "slot_data.json")
 
     with open(items_file, "r") as f:
         item_names = json.load(f)
@@ -39,6 +40,16 @@ def main():
         location_names = json.load(f)
         print(f"locations: {location_names[:10]}...")
         location_names = set(location_names)
+
+    slot_number = None
+    slot_data = None
+    if os.path.exists(slot_data_file):
+        with open(slot_data_file, "r") as f:
+            slot_data_info = json.load(f)
+        slot_number = slot_data_info["slot"]
+        slot_data = slot_data_info["data"]
+        preview = str(slot_data)[:200]
+        print(f"slot_data (slot {slot_number}): {preview}...")
 
     # 1. Copy custom worlds (tracker.apworld + any game worlds) into worlds/ so
     #    Generate can discover them
@@ -105,6 +116,19 @@ def main():
                 ws.recv()
             except Exception:
                 continue
+
+        # 5a. Push real slot data into the server's data storage so the
+        #     Universal Tracker sees the correct values
+        if slot_data:
+            for field, value in slot_data.items():
+                ws.send(json.dumps([{
+                    "cmd": "Set",
+                    "key": field,
+                    "default": None,
+                    "want_reply": False,
+                    "operations": [{"operation": "replace", "value": value}]
+                }]))
+                print(f"set slot_data field {field}")
 
         # 5. Give the player all the items they currently have via !getitem
         for item_name in item_names:
