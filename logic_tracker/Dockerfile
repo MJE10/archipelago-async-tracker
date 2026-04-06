@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip3 install websocket-client --break-system-packages
 
 # Download and extract official Archipelago 0.6.6 binary release
-RUN curl -L https://github.com/ArchipelagoMW/Archipelago/releases/download/0.6.6/Archipelago_0.6.6_linux-x86_64.tar.gz \
+RUN curl -L https://github.com/ArchipelagoMW/Archipelago/releases/download/0.6.7/Archipelago_0.6.7_linux-x86_64.tar.gz \
     -o /tmp/ap.tar.gz \
     && mkdir -p /opt/Archipelago \
     && tar -xzf /tmp/ap.tar.gz -C /opt/Archipelago --strip-components=1 \

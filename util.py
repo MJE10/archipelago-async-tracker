@@ -4,6 +4,7 @@ import json
 import time
 import redis
 import tempfile
+import yaml
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from logic_tracker.run_logic import get_logic_items
 from pathlib import Path
@@ -189,7 +190,10 @@ def calculate_player_logic(game, player_name, player_data, rid):
     with tempfile.TemporaryDirectory() as tmpdirname:
         dest_dir = Path(tmpdirname)
         for yaml_file in path.glob('*.yaml'):
-            shutil.copy(yaml_file, dest_dir)
+            with open(yaml_file) as f:
+                yaml_data = yaml.safe_load(f)
+            if yaml_data.get("name")[:len(player_name)] == player_name:
+                shutil.copy(yaml_file, dest_dir)
 
         data_dir = dest_dir.joinpath("data")
         os.mkdir(data_dir)
