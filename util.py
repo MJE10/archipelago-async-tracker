@@ -247,11 +247,14 @@ def calculate_player_logic(game, player_name, player_data, rid):
             return (player_name, {"in_logic": [], "calculated_at": None, "item_names": []})
 
 
+MAX_CONCURRENT_TRACKERS = 2
+
+
 def calculate_trackers(game, interesting_players):
     in_logic = {}
     rid = room_id(game)
 
-    with ThreadPoolExecutor() as executor:
+    with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_TRACKERS) as executor:
         futures = {
             executor.submit(calculate_player_logic, game, player_name, player_data, rid): player_name
             for player_name, player_data in interesting_players.items()
