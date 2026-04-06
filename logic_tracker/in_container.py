@@ -134,6 +134,72 @@ def main():
                 }]))
                 print(f"set slot_data field {field}")
 
+        ws.close()
+
+        # 5b. Re-connect and verify that the slot data fields were stored correctly
+        if slot_data:
+            print(f"--- Verifying slot data via new WebSocket connection ---")
+            ws = create_connection(ws_url)
+            ws.send(json.dumps(connect_msg))
+
+            # Drain connection response
+            start_time = time.time()
+            ws.settimeout(0.5)
+            while time.time() - start_time < 1:
+                try:
+                    ws.recv()
+                except Exception:
+                    continue
+
+            ws.send(json.dumps([{
+                "cmd": "Get",
+                "keys": list(slot_data.keys()),
+            }]))
+
+            retrieved = None
+            ws.settimeout(5)
+            try:
+                while True:
+                    raw = ws.recv()
+                    packets = json.loads(raw)
+                    for pkt in packets:
+                        if pkt.get("cmd") == "Retrieved":
+                            retrieved = pkt.get("keys", {})
+                            break
+                    if retrieved is not None:
+                        break
+            except Exception as e:
+                print(f"Warning: did not receive Retrieved packet: {e}", file=sys.stderr)
+
+            if retrieved is not None:
+                mismatches = []
+                for field, expected in slot_data.items():
+                    actual = retrieved.get(field)
+                    if actual != expected:
+                        mismatches.append(field)
+                        print(f"  MISMATCH {field}: expected {str(expected)[:80]!r}, got {str(actual)[:80]!r}", file=sys.stderr)
+                    else:
+                        print(f"  OK {field}")
+                if mismatches:
+                    print(f"Slot data verification FAILED for fields: {mismatches}", file=sys.stderr)
+                else:
+                    print("Slot data verification passed.")
+            else:
+                print("Slot data verification skipped (no Retrieved packet received).", file=sys.stderr)
+
+            ws.close()
+
+        # Re-open connection for item grants
+        ws = create_connection(ws_url)
+        ws.send(json.dumps(connect_msg))
+        start_time = time.time()
+        ws.settimeout(0.5)
+        while time.time() - start_time < 1:
+            try:
+                ws.recv()
+            except Exception:
+                continue
+
         # 5. Give the player all the items they currently have via !getitem
         for item_name in item_names:
             ws.send(json.dumps([{"cmd": "Say", "text": f"!getitem {item_name}"}]))
