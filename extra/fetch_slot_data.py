@@ -36,7 +36,7 @@ def fetch_for_player(game, player_name, player_index, port, host, protocol, pass
         "game": player_game_name,
         "uuid": "slot-data-fetcher",
         "name": player_name,
-        "items_handling": 0,
+        "items_handling": 7,
         "version": {"major": 0, "minor": 6, "build": 6, "class": "Version"},
         "tags": ["TextOnly"],
         "slot_data": True,
@@ -44,14 +44,21 @@ def fetch_for_player(game, player_name, player_index, port, host, protocol, pass
     ws.send(json.dumps(connect_msg))
 
     connected_packet = None
+    received_items_packet = None
+    handshake_done = False
     for _ in range(10):
         raw = ws.recv()
         messages = json.loads(raw)
         for msg in messages:
-            if msg.get("cmd") == "Connected":
+            cmd = msg.get("cmd")
+            if cmd == "Connected":
                 connected_packet = msg
-                break
-        if connected_packet is not None:
+            elif cmd == "ReceivedItems" and connected_packet is not None:
+                received_items_packet = msg
+            elif cmd == "PrintJSON" and connected_packet is not None and received_items_packet is not None:
+                # PrintJSON signals the end of the handshake sequence
+                handshake_done = True
+        if handshake_done or (connected_packet is not None and received_items_packet is not None):
             break
 
     ws.close()
@@ -85,6 +92,19 @@ def fetch_for_player(game, player_name, player_index, port, host, protocol, pass
 
     r.set(redis_key, json.dumps(current))
     print(f"Cached slot data for player {slot_number} ('{player_name}') in Redis key '{redis_key}' with no expiry.")
+
+    # Store received items in the extra_items hash for logic calculation
+    if received_items_packet is not None:
+        extra_items_key = redis_key_for(game, "extra_items")
+        items = received_items_packet.get("items", [])
+        for ni in items:
+            field = f"{ni['player']}_{ni['location']}"
+            value = json.dumps({"player": player_name, "item": ni})
+            r.hset(extra_items_key, field, value)
+        print(f"Stored {len(items)} extra item(s) for '{player_name}' in Redis key '{extra_items_key}'.")
+    else:
+        print(f"No ReceivedItems packet received for '{player_name}'; no extra items stored.")
+
     return True
 
 

@@ -266,6 +266,31 @@ def process_game(name, game, memory):
         locations_done = len(player["locations"])
         new_locations[player_name] = locations_done - memory[player_name]["locations"]
     
+    # Merge extra/starting items (e.g. start inventory) into each player's item list
+    extra_items_key = redis_key_for(game, "extra_items")
+    extra_items_hash = r.hgetall(extra_items_key)
+    if extra_items_hash:
+        for player_name, pdata in interesting_players.items():
+            existing_loc_player = {
+                (item[IDX_ITEM_LOCATION], item[IDX_ITEM_PLAYER])
+                for item in pdata["items"]
+            }
+            for field, val_str in extra_items_hash.items():
+                entry = json.loads(val_str)
+                if entry["player"] != player_name:
+                    continue
+                ni = entry["item"]
+                if (ni["location"], ni["player"]) in existing_loc_player:
+                    r.hdel(extra_items_key, field)
+                else:
+                    pdata["items"].append([ni["item"], ni["location"], ni["player"], ni["flags"]])
+                    if player_name in per_player:
+                        data = datapackage(game, pdata["index"])
+                        item_name = next((k for k, v in data["item_name_to_id"].items() if v == ni["item"]), None)
+                        if item_name:
+                            gui = per_player[player_name].setdefault("items", {})
+                            gui[item_name] = gui.get(item_name, 0) + 1
+
     # Determine things that are in logic
     in_logic = calculate_trackers(game, interesting_players)
     for player_name in in_logic:
