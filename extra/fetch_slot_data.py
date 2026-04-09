@@ -50,6 +50,7 @@ def fetch_for_player(game, player_name, player_index, port, host, protocol, pass
         raw = ws.recv()
         messages = json.loads(raw)
         for msg in messages:
+            print(msg)
             cmd = msg.get("cmd")
             if cmd == "Connected":
                 connected_packet = msg

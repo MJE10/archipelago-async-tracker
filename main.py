@@ -188,10 +188,11 @@ def update_all_games():
         }
         for future in as_completed(futures):
             name = futures[future]
-            per_player, game_checks_done, game_checks_total = future.result()
+            per_player, game_checks_done, game_checks_total, hints = future.result()
             all_results[name]["players"] = per_player
             all_results[name]["game_checks_done"] = game_checks_done
             all_results[name]["game_checks_total"] = game_checks_total
+            all_results[name]["hints"] = hints
             socketio.emit('game_update', {name: all_results[name]})
 
     for (name, game, _) in games_to_process:
@@ -332,15 +333,50 @@ def process_game(name, game, memory):
             gui_counts = per_player[player_name].get("items", {})
             per_player[player_name]["logic_items_match"] = (logic_counts == gui_counts)
 
-    return (per_player, game_checks_done, game_checks_total)
-    # return {
-    #     # "new_hints": new_hints,
-    #     # "updated_hints": updated_hints,
-    #     # "new_items": new_items,
-    #     # "new_locations": new_locations,
-    #     # "in_logic": in_logic,
-    #     # "per_player": per_player
-    # }
+    # Resolve hints
+    HINT_STATUS_TEXT = {0: "Unspecified", 10: "No Priority", 20: "Avoid", 30: "Priority", 40: "Found"}
+    players_list = room_status(game)["players"]
+    n_players = len(players_list)
+    seen_hint_ids = set()
+    resolved_hints = []
+    for p in tracker["hints"]:
+        for hint in p["hints"]:
+            hid = hint_id(hint)
+            if hid in seen_hint_ids:
+                continue
+            seen_hint_ids.add(hid)
+            recv_p, find_p, loc_id, item_id = hint[0] - 1, hint[1] - 1, hint[2], hint[3]
+            found = bool(hint[4])
+            entrance = hint[5] if len(hint) > 5 else ""
+            item_flags = hint[6] if len(hint) > 6 else 0
+            status_code = hint[7] if len(hint) > 7 else 0
+            if not (0 <= recv_p < n_players and 0 <= find_p < n_players):
+                continue
+            recv_name = player_idx_to_name(game, recv_p)
+            find_name = player_idx_to_name(game, find_p)
+            try:
+                recv_data = datapackage(game, recv_p)
+                item_name = next((k for k, v in recv_data["item_name_to_id"].items() if v == item_id), str(item_id))
+            except Exception:
+                item_name = str(item_id)
+            try:
+                find_data = datapackage(game, find_p)
+                loc_name = next((k for k, v in find_data["location_name_to_id"].items() if v == loc_id), str(loc_id))
+            except Exception:
+                loc_name = str(loc_id)
+            status_text = "Found" if found else HINT_STATUS_TEXT.get(status_code, "Unspecified")
+            resolved_hints.append({
+                "receiving_player": recv_name,
+                "finding_player": find_name,
+                "location": loc_name,
+                "item": item_name,
+                "found": found,
+                "entrance": entrance,
+                "item_flags": item_flags,
+                "status": status_text,
+            })
+
+    return (per_player, game_checks_done, game_checks_total, resolved_hints)
 
 
 if __name__ == "__main__":

@@ -153,6 +153,8 @@
         let NOTIF_DUR = null;       // null | 1 | 2 | 3 | 'custom'
         let LAST_RECEIVED_AT = null;
         let LAST_FETCH_ERROR = false;
+        let HINTS_HIDE_UNSPECIFIED = true;
+        let HINTS_HIDE_FOUND = true;
 
         function formatActivityDate(gmtString) {
             if (!gmtString) return "No activity";
@@ -245,7 +247,7 @@
             const top = el.getBoundingClientRect().top + window.scrollY - stickyH - 16;
             window.scrollTo({ top, behavior: 'smooth' });
         }
-        function collapseAll() { document.querySelectorAll('[id^="g_"], [id^="p_"]').forEach(el => { el.classList.add('collapsed'); localStorage.setItem(STORAGE_PREFIX + el.id, 'true'); }); }
+        function collapseAll() { document.querySelectorAll('[id^="g_"], [id^="p_"], #hints-panel').forEach(el => { el.classList.add('collapsed'); localStorage.setItem(STORAGE_PREFIX + el.id, 'true'); }); }
         function toggleCollapse(id) { const element = document.getElementById(id); const isCollapsed = element.classList.toggle('collapsed'); localStorage.setItem(STORAGE_PREFIX + id, isCollapsed); }
         function isCollapsed(id) { const stored = localStorage.getItem(STORAGE_PREFIX + id); return stored === null ? false : stored === 'true'; }
         function matchesSearch(text) { if (!SEARCH_QUERY) return true; return SEARCH_QUERY.split(/\s+/).every(word => text.toLowerCase().includes(word)); }
@@ -310,6 +312,59 @@
                         </tbody>
                     </table>`;
                 container.appendChild(summaryEl);
+            }
+            // ----------------------------------
+
+            // --- Hints panel ---
+            const STATUS_SORT_ORDER = { 'Priority': 0, 'Unspecified': 1, 'No Priority': 2, 'Avoid': 3, 'Found': 4 };
+            const gamesWithHints = Object.keys(CURRENT_DATA).filter(n => CURRENT_DATA[n].hints?.length > 0);
+            const multiGame = gamesWithHints.length > 1;
+            const allHints = [];
+            for (const gameName of gamesWithHints) {
+                for (const h of CURRENT_DATA[gameName].hints) {
+                    allHints.push(multiGame ? {...h, _game: gameName} : {...h});
+                }
+            }
+            allHints.sort((a, b) => (STATUS_SORT_ORDER[a.status] ?? 99) - (STATUS_SORT_ORDER[b.status] ?? 99));
+            if (allHints.length > 0) {
+                const priorityUnfound = allHints.filter(h => h.status === 'Priority' && !h.found).length;
+                const otherUnfound    = allHints.filter(h => h.status !== 'Priority' && !h.found).length;
+                const foundCount      = allHints.filter(h => h.found).length;
+                let visibleHints = allHints;
+                if (HINTS_HIDE_UNSPECIFIED) visibleHints = visibleHints.filter(h => h.status !== 'Unspecified');
+                if (HINTS_HIDE_FOUND)       visibleHints = visibleHints.filter(h => !h.found);
+                if (SEARCH_QUERY) visibleHints = visibleHints.filter(h =>
+                    matchesSearch([h.item, h.location, h.receiving_player, h.finding_player, h.entrance || '', h._game || ''].join(' '))
+                );
+                const hintsEl = document.createElement('div');
+                hintsEl.id = 'hints-panel';
+                hintsEl.className = `card rounded-2xl overflow-hidden mb-6 ${isCollapsed('hints-panel') ? 'collapsed' : ''}`;
+                hintsEl.innerHTML = `
+                    <div class="flex items-center gap-2 md:gap-4 p-4 bg-white/5 cursor-pointer hover:bg-white/10 transition-all" onclick="toggleCollapse('hints-panel')">
+                        <svg class="rotate-icon w-5 h-5 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                        <span class="f-14 font-bold text-white">Hints</span>
+                        <div class="flex items-center gap-1.5">
+                            ${priorityUnfound > 0 ? `<span class="f-10 px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 border border-orange-500/30 font-bold" title="Priority unfound">${priorityUnfound}</span>` : ''}
+                            ${otherUnfound    > 0 ? `<span class="f-10 px-2 py-0.5 rounded-full bg-gray-500/15   text-gray-400   border border-gray-500/20  font-bold" title="Other unfound">${otherUnfound}</span>`       : ''}
+                            ${foundCount      > 0 ? `<span class="f-10 px-2 py-0.5 rounded-full bg-green-500/20  text-green-300  border border-green-500/30 font-bold" title="Found">${foundCount}</span>`                 : ''}
+                        </div>
+                        <div class="ml-auto flex gap-2" onclick="event.stopPropagation()">
+                            <button onclick="HINTS_HIDE_UNSPECIFIED = !HINTS_HIDE_UNSPECIFIED; render();"
+                                class="btn border f-10 font-bold uppercase tracking-wider px-3 py-1.5 ${HINTS_HIDE_UNSPECIFIED ? 'border-blue-500/40 bg-blue-500/10 text-blue-400' : 'border-white/10 text-gray-500 hover:bg-white/5'}">
+                                Hide Unspecified
+                            </button>
+                            <button onclick="HINTS_HIDE_FOUND = !HINTS_HIDE_FOUND; render();"
+                                class="btn border f-10 font-bold uppercase tracking-wider px-3 py-1.5 ${HINTS_HIDE_FOUND ? 'border-blue-500/40 bg-blue-500/10 text-blue-400' : 'border-white/10 text-gray-500 hover:bg-white/5'}">
+                                Hide Found
+                            </button>
+                        </div>
+                    </div>
+                    <div class="collapse-wrapper">
+                        <div class="collapse-inner p-4 bg-black/40 border-t border-white/5">
+                            ${renderHints(visibleHints, multiGame)}
+                        </div>
+                    </div>`;
+                container.appendChild(hintsEl);
             }
             // ----------------------------------
 
@@ -477,6 +532,59 @@
         }
 
         function setPlayerTab(playerId, tab) { PLAYER_TABS[playerId] = tab; render(); }
+
+        const HINT_STATUS_STYLES = {
+            'Priority':    'bg-orange-500/20 text-orange-300 border-orange-500/30',
+            'Found':       'bg-green-500/20  text-green-300  border-green-500/30',
+            'Avoid':       'bg-red-500/20    text-red-400    border-red-500/30',
+            'No Priority': 'bg-blue-500/15   text-blue-400   border-blue-500/20',
+            'Unspecified': 'bg-gray-500/15   text-gray-500   border-gray-500/20',
+        };
+
+        // hints: flat array of hint objects (each may have _game set for multi-game display)
+        // showGame: render a "Game" column
+        function renderHints(hints, showGame = false) {
+            if (!hints || hints.length === 0) return '';
+            const rows = hints.map(h => {
+                const statusCls = HINT_STATUS_STYLES[h.status] || HINT_STATUS_STYLES['Unspecified'];
+                const progressionStar = (h.item_flags & 0b001) ? '<span class="text-yellow-400 ml-1" title="Progression item">★</span>' : '';
+                const usefulDiamond  = (h.item_flags & 0b010) ? '<span class="text-purple-400 ml-1" title="Useful item">◆</span>'       : '';
+                const gameCell = showGame ? `<td class="px-3 py-2 f-10 text-gray-600 font-mono whitespace-nowrap">${escAttr(h._game || '')}</td>` : '';
+                return `
+                <tr class="border-b border-white/5 last:border-0 hover:bg-white/[0.03] transition-colors ${h.found ? 'opacity-40' : ''}">
+                    <td class="px-3 py-2 whitespace-nowrap">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded f-10 font-bold border uppercase tracking-wider ${statusCls}">${h.status}</span>
+                    </td>
+                    ${gameCell}
+                    <td class="px-3 py-2">
+                        ${progressionStar}${usefulDiamond}<span class="f-12 font-bold text-gray-200"> ${h.item}</span>
+                    </td>
+                    <td class="px-3 py-2 f-12 font-bold text-blue-400 whitespace-nowrap">${h.receiving_player}</td>
+                    <td class="px-3 py-2">
+                        <span class="f-12 text-gray-400">${h.location}</span>
+                        ${h.entrance ? `<div class="f-10 text-gray-600 font-mono mt-0.5 truncate max-w-[220px]" title="${escAttr(h.entrance)}">↳ ${h.entrance}</div>` : ''}
+                    </td>
+                    <td class="px-3 py-2 f-12 text-gray-500 whitespace-nowrap">${h.finding_player}</td>
+                </tr>`;
+            }).join('');
+            const gameHeader = showGame ? '<th class="text-left f-10 font-bold uppercase tracking-widest text-gray-600 px-3 py-2 whitespace-nowrap">Game</th>' : '';
+            return `
+            <div class="overflow-x-auto rounded-lg border border-white/5">
+                <table class="w-full border-collapse">
+                    <thead>
+                        <tr class="bg-white/5 border-b border-white/5">
+                            <th class="text-left f-10 font-bold uppercase tracking-widest text-gray-600 px-3 py-2 whitespace-nowrap">Status</th>
+                            ${gameHeader}
+                            <th class="text-left f-10 font-bold uppercase tracking-widest text-gray-600 px-3 py-2">Item</th>
+                            <th class="text-left f-10 font-bold uppercase tracking-widest text-gray-600 px-3 py-2 whitespace-nowrap">For</th>
+                            <th class="text-left f-10 font-bold uppercase tracking-widest text-gray-600 px-3 py-2">Location</th>
+                            <th class="text-left f-10 font-bold uppercase tracking-widest text-gray-600 px-3 py-2 whitespace-nowrap">By</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>`;
+        }
 
         // --- Notification helpers ---
         function hasNotification(gameName, playerName) {
