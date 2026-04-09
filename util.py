@@ -151,17 +151,22 @@ def get_player_slot_data(game, player_index):
 
 def calculate_player_logic(game, player_name, player_data, rid):
     """Calculate in-logic locations for a single player. Returns (player_name, result_list)."""
-    # 1. Prepare data and generate hash
+    # 1. Fetch cached Connected packet — required; fail fast if missing
+    connected_key = f"{REDIS_PREFIX}:{rid}:connected:{player_name}"
+    connected_raw = r.get(connected_key)
+    if connected_raw is None:
+        print(f"No cached Connected packet for {player_name}, skipping logic")
+        return (player_name, {"in_logic": [], "calculated_at": None, "item_names": []})
+    connected_packet = json.loads(connected_raw)
+
+    # 2. Prepare data and generate hash
     game_link = game.get("link", "")
     items_received = sorted(player_data.get("items", []))
+    checks_done = set(player_data.get("checks_done", []))
 
-    datapack = datapackage(game, player_data["index"])["location_name_to_id"]
-    missing_checks = sorted([
-        datapack[k] for k in datapack.keys()
-        if datapack[k] not in player_data.get("checks_done", [])
-    ])
-
-    player_slot_data = get_player_slot_data(game, player_data["index"])
+    # missing_locations: what the server reported minus whatever has since been checked
+    missing_checks = sorted([loc for loc in connected_packet.get("missing_locations", []) if loc not in checks_done])
+    player_slot_data = connected_packet.get("slot_data", {})
 
     hash_payload = {
         "link": game_link,
@@ -172,16 +177,16 @@ def calculate_player_logic(game, player_name, player_data, rid):
     }
     state_hash = hashlib.sha256(json.dumps(hash_payload, sort_keys=True).encode()).hexdigest()
 
-    # 2. Hierarchical key: REDIS_PREFIX:ROOM_ID:logic:PLAYER_NAME:HASH
+    # 3. Hierarchical key: REDIS_PREFIX:ROOM_ID:logic:PLAYER_NAME:HASH
     new_redis_key = f"{REDIS_PREFIX}:{rid}:logic:{player_name}:{state_hash}"
 
-    # 3. Check if this exact state is already cached
+    # 4. Check if this exact state is already cached
     cached_logic = r.get(new_redis_key)
-    if cached_logic:
-        print(f"CACHED logic for {game['name']}/{player_name}")
-        return (player_name, json.loads(cached_logic))
+    # if cached_logic:
+    #     print(f"CACHED logic for {game['name']}/{player_name}")
+    #     return (player_name, json.loads(cached_logic))
 
-    # 4. Calculate logic (expensive — runs Docker)
+    # 5. Calculate logic (expensive — runs Docker)
     path = Path(os.path.join("games", game["name"]))
     if not os.path.exists(path):
         return (player_name, {"in_logic": [], "calculated_at": None, "item_names": []})
@@ -198,34 +203,83 @@ def calculate_player_logic(game, player_name, player_data, rid):
         data_dir = dest_dir.joinpath("data")
         os.mkdir(data_dir)
 
-        if player_slot_data is not None:
-            slot_number = player_data["index"] + 1
-            player_game = room_status(game)["players"][player_data["index"]][1]
-            with open(data_dir.joinpath("slot_data.json"), "w") as f:
-                json.dump({"slot": slot_number, "data": player_slot_data, "game": player_game}, f)
-
         data = datapackage(game, player_data["index"])
         id_to_name = {v: k for k, v in data["item_name_to_id"].items()}
         item_names = [id_to_name[iid[0]] for iid in player_data["items"] if iid[0] in id_to_name]
 
-        location_names = list(data["location_name_to_id"].keys())
+        player_game = room_status(game)["players"][player_data["index"]][1]
+        checksum = static_tracker(game)["datapackage"][player_game]["checksum"]
 
-        with open(data_dir.joinpath("item_names.json"), "w") as f:
-            json.dump(item_names, f)
+        # Build the three packets the mock WS server will replay to UT
+        room_info_packet = {
+            "cmd": "RoomInfo",
+            "version": {"major": 0, "minor": 6, "build": 7, "class": "Version"},
+            "generator_version": {"major": 0, "minor": 6, "build": 7, "class": "Version"},
+            "tags": ["AP"],
+            "password": False,
+            "permissions": {"release": 0, "collect": 0, "remaining": 0},
+            "hint_cost": 10,
+            "location_check_points": 1,
+            "games": [player_game],
+            "datapackage_checksums": {player_game: checksum},
+            "seed_name": str(player_slot_data.get("seed_name", "0")),
+            "time": time.time(),
+            "class": "RoomInfo",
+        }
 
-        with open(data_dir.joinpath("location_names.json"), "w") as f:
-            json.dump(location_names, f)
+        mod_connected = dict(connected_packet)
+        mod_connected.update({
+            "cmd": "Connected",
+            "team": 0,
+            "slot": 1,
+            "players": [{"team": 0, "slot": 1, "alias": player_name, "name": player_name, "class": "NetworkPlayer"}],
+            "missing_locations": missing_checks,
+            "checked_locations": list(checks_done),
+            "slot_info": {"1": {"name": player_name, "game": player_game, "type": 1, "group_members": [], "class": "NetworkSlot"}},
+            "slot_data": player_slot_data,
+        })
 
-        checks_done = set(player_data.get("checks_done", []))
-        name_to_id = data["location_name_to_id"]
+        received_items_packet = {
+            "cmd": "ReceivedItems",
+            "index": 0,
+            "items": [
+                {
+                    "item": item[IDX_ITEM_ITEM],
+                    "location": 0,
+                    "player": 0,
+                    "flags": 0,
+                    "class": "NetworkItem"
+                }
+                # [item[IDX_ITEM_ITEM], item[IDX_ITEM_LOCATION], item[IDX_ITEM_PLAYER], item[IDX_ITEM_FLAGS]]
+                for item in player_data.get("items", [])
+                # for item in [[234782020]]
+            ],
+            "class": "ReceivedItems",
+        }
+
+        packets = {
+            "room_info": room_info_packet,
+            "connected": mod_connected,
+            "received_items": received_items_packet,
+            "location_names": list(data["location_name_to_id"].keys()),
+            "retrieved": {
+                "cmd": "Retrieved",
+                "keys": {
+                    # "_read_item_name_groups_Jigsaw": [],
+                    # "_read_hints_0_1": [],
+                    # "_read_location_name_groups_Jigsaw": []
+                }
+            }
+        }
+        with open(data_dir.joinpath("packets.json"), "w") as f:
+            json.dump(packets, f)
 
         raw_result, docker_stdout = get_logic_items(tmpdirname, player_name)
 
         if raw_result is not None:
-            # 5. Docker succeeded: build result, delete old keys, store new entry
-            result = [loc for loc in raw_result if name_to_id.get(loc) not in checks_done]
+            # 6. Docker succeeded: store result, evict old hash keys
             calculated_at = datetime.now(timezone.utc).isoformat()
-            result_dict = {"in_logic": result, "calculated_at": calculated_at, "item_names": item_names}
+            result_dict = {"in_logic": raw_result, "calculated_at": calculated_at, "item_names": item_names}
 
             old_player_keys = list(r.scan_iter(f"{REDIS_PREFIX}:{rid}:logic:{player_name}:*"))
             if old_player_keys:
@@ -238,7 +292,7 @@ def calculate_player_logic(game, player_name, player_data, rid):
 
             return (player_name, result_dict)
         else:
-            # 6. Docker failed: return any stale cached entry if available
+            # 7. Docker failed: return any stale cached entry if available
             old_player_keys = list(r.scan_iter(f"{REDIS_PREFIX}:{rid}:logic:{player_name}:*"))
             if old_player_keys:
                 stale_data = r.get(old_player_keys[0])

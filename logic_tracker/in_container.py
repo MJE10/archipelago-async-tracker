@@ -1,223 +1,110 @@
-import subprocess
 import os
 import glob
-import time
 import json
 import argparse
-import sys
+import subprocess
+import time
+import threading
+import asyncio
 import shutil
-from websocket import create_connection
-from datetime import datetime
+
+import websockets
+
+
+async def handle_client(websocket, room_info, connected, received_items, retrieved):
+    """Serve the three pre-built packets to a connecting UT client."""
+    # Step 1: server sends RoomInfo immediately on connection
+    await websocket.send(json.dumps([room_info]))
+
+    # Step 2: wait for client packets (GetDataPackage and/or Connect)
+    async for raw in websocket:
+        try:
+            pkts = json.loads(raw)
+        except Exception:
+            continue
+        if not isinstance(pkts, list):
+            pkts = [pkts]
+        for pkt in pkts:
+            cmd = pkt.get("cmd")
+            if cmd == "GetDataPackage":
+                print("GetDataPackage packet")
+                # UT will fall back to its local .apworld cache; send empty response
+                await websocket.send(json.dumps([{"cmd": "DataPackage", "data": {"games": {}}}]))
+            elif cmd == "Connect":
+                print("Connect packet")
+                # Step 3: respond with Connected then ReceivedItems
+                await websocket.send(json.dumps([connected]))
+                await websocket.send(json.dumps([received_items]))
+                await websocket.send(json.dumps([{"cmd": "Retrieved", "keys": {"_read_race_mode": 0}}]))
+                await websocket.send(json.dumps([retrieved]))
+                # Keep connection alive until UT closes it
+                try:
+                    async for _ in websocket:
+                        pass
+                except websockets.exceptions.ConnectionClosed:
+                    pass
+                return
+
+
+async def run_server(port, room_info, connected, received_items, retrieved):
+    async def handler(websocket):
+        await handle_client(websocket, room_info, connected, received_items, retrieved)
+
+    async with websockets.serve(handler, "localhost", port):
+        await asyncio.Future()  # run until daemon thread is killed
 
 
 def main():
-    now = datetime.now()
-    print(now.strftime("%Y/%m/%d %H:%M:%S"))
-
-    print("KIVY_NO_CONSOLELOG:", os.getenv('KIVY_NO_CONSOLELOG'), file=sys.stderr)
+    print(time.time())
 
     parser = argparse.ArgumentParser(description="Archipelago Logic Runner")
-    parser.add_argument("--name", default="MJE10_celeste", help="Player slot name")
-    parser.add_argument("--port", type=int, default=38243, help="Port for the AP server")
+    parser.add_argument("--name", default="player", help="Player slot name")
+    parser.add_argument("--port", type=int, default=38243, help="Port for mock WS server")
     args = parser.parse_args()
 
     base_path = "/opt/Archipelago"
     players_path = os.path.join(base_path, "Players")
     custom_worlds_path = os.path.join(base_path, "custom_worlds")
     worlds_path = os.path.join(base_path, "worlds")
-    output_dir = os.path.join(base_path, "output")
-    launcher_path = os.path.join(base_path, "ArchipelagoLauncher")
 
-    items_file = os.path.join(players_path, "data", "item_names.json")
-    locations_file = os.path.join(players_path, "data", "location_names.json")
-    slot_data_file = os.path.join(players_path, "data", "slot_data.json")
+    packets_file = os.path.join(players_path, "data", "packets.json")
+    with open(packets_file) as f:
+        packets = json.load(f)
 
-    with open(items_file, "r") as f:
-        item_names = json.load(f)
-        print(f"items: {item_names[:10]}...")
+    room_info = packets["room_info"]
+    connected = packets["connected"]
+    received_items = packets["received_items"]
+    location_names = packets["location_names"]
+    retrieved = packets["retrieved"]
 
-    with open(locations_file, "r") as f:
-        location_names = json.load(f)
-        print(f"locations: {location_names[:10]}...")
-        location_names = set(location_names)
+    # Build a set of stripped names for fast membership testing
+    stripped_location_names = {l.split('(')[0].strip() for l in location_names}
 
-    slot_number = None
-    slot_data = None
-    slot_game = ""
-    if os.path.exists(slot_data_file):
-        with open(slot_data_file, "r") as f:
-            slot_data_info = json.load(f)
-        slot_number = slot_data_info["slot"]
-        slot_data = slot_data_info["data"]
-        slot_game = slot_data_info.get("game", "")
-        if slot_game == "":
-            print("slot game missing")
-        preview = str(slot_data)[:200]
-        print(f"slot_data (slot {slot_number}, game {slot_game}): {preview}...")
+    print(f"Loaded {len(location_names)} location names, {len(connected.get('missing_locations', []))} missing, "
+          f"{len(received_items.get('items', []))} items received")
 
-    # 1. Copy custom worlds (tracker.apworld + any game worlds) into worlds/ so
-    #    Generate can discover them
+    # Copy tracker.apworld (and any game worlds) into worlds/ so UT can find them
     os.makedirs(worlds_path, exist_ok=True)
     for apworld in glob.glob(os.path.join(custom_worlds_path, "*.apworld")):
         dest = os.path.join(worlds_path, os.path.basename(apworld))
         shutil.copy2(apworld, dest)
         print(f"Copied {os.path.basename(apworld)} to worlds/")
 
-    # 2. Generate a game from the player YAMLs in Players/
-    # Clear any stale zips first so we always host the freshly generated seed
-    os.makedirs(output_dir, exist_ok=True)
-    for old_zip in glob.glob(os.path.join(output_dir, "*.zip")):
-        os.remove(old_zip)
-    print("--- Running Generation ---")
-    gen_result = subprocess.run(
-        [launcher_path, "Generate"],
-        capture_output=True,
-        text=True,
-        cwd=base_path
-    )
-    print(gen_result.stdout)
-    if gen_result.stderr:
-        print(gen_result.stderr, file=sys.stderr)
+    # Start mock WebSocket server in a daemon thread
+    def run_loop():
+        asyncio.run(run_server(args.port, room_info, connected, received_items, retrieved))
 
-    # 3. Find the generated zip and start the server in the background
-    zip_files = glob.glob(os.path.join(output_dir, "*.zip"))
-    if not zip_files:
-        print(f"Error: No zip file found in {output_dir}", file=sys.stderr)
-        sys.exit(1)
-    target_zip = zip_files[0]
-    print(f"--- Hosting: {os.path.basename(target_zip)} on port {args.port} ---")
+    server_thread = threading.Thread(target=run_loop, daemon=True)
+    server_thread.start()
+    time.sleep(1)  # give server a moment to bind
 
-    host_proc = subprocess.Popen([
-        launcher_path, "Host", "--", "--port", str(args.port), target_zip
-    ])
+    launcher_path = os.path.join(base_path, "ArchipelagoLauncher")
 
-    # 4. Wait for server to come up, then connect via WebSocket
-    time.sleep(10)
-    ws_url = f"ws://localhost:{args.port}"
+    print(f"--- Running Universal Tracker for {args.name} on port {args.port} ---")
 
-    try:
-        print(f"--- Connecting to WebSocket: {ws_url} ---")
-        ws = create_connection(ws_url)
-
-        connect_msg = [{
-            "cmd": "Connect",
-            "password": "",
-            "game": slot_game,
-            "uuid": "1234",
-            "name": args.name,
-            "items_handling": 0,
-            "version": {"major": 0, "minor": 6, "build": 6, "class": "Version"},
-            "tags": [] if slot_game != "" else ["TextOnly"],
-            "slot_data": False,
-        }]
-        ws.send(json.dumps(connect_msg))
-
-        # Drain connection response
-        start_time = time.time()
-        ws.settimeout(0.5)
-        while time.time() - start_time < 1:
-            try:
-                ws.recv()
-            except Exception:
-                continue
-
-        # 5a. Push real slot data into the server's data storage so the
-        #     Universal Tracker sees the correct values
-        if slot_data:
-            for field, value in slot_data.items():
-                ws.send(json.dumps([{
-                    "cmd": "Set",
-                    "key": field,
-                    "default": None,
-                    "want_reply": False,
-                    "operations": [{"operation": "replace", "value": value}]
-                }]))
-                print(f"set slot_data field {field}")
-
-        ws.close()
-
-        # 5b. Re-connect and verify that the slot data fields were stored correctly
-        if slot_data:
-            print(f"--- Verifying slot data via new WebSocket connection ---")
-            ws = create_connection(ws_url)
-            ws.send(json.dumps(connect_msg))
-
-            # Drain connection response
-            start_time = time.time()
-            ws.settimeout(0.5)
-            while time.time() - start_time < 1:
-                try:
-                    ws.recv()
-                except Exception:
-                    continue
-
-            ws.send(json.dumps([{
-                "cmd": "Get",
-                "keys": list(slot_data.keys()),
-            }]))
-
-            retrieved = None
-            ws.settimeout(5)
-            try:
-                while True:
-                    raw = ws.recv()
-                    packets = json.loads(raw)
-                    for pkt in packets:
-                        if pkt.get("cmd") == "Retrieved":
-                            retrieved = pkt.get("keys", {})
-                            break
-                    if retrieved is not None:
-                        break
-            except Exception as e:
-                print(f"Warning: did not receive Retrieved packet: {e}", file=sys.stderr)
-
-            if retrieved is not None:
-                mismatches = []
-                for field, expected in slot_data.items():
-                    actual = retrieved.get(field)
-                    if actual != expected:
-                        mismatches.append(field)
-                        print(f"  MISMATCH {field}: expected {str(expected)[:80]!r}, got {str(actual)[:80]!r}", file=sys.stderr)
-                    else:
-                        print(f"  OK {field}")
-                if mismatches:
-                    print(f"Slot data verification FAILED for fields: {mismatches}", file=sys.stderr)
-                else:
-                    print("Slot data verification passed.")
-            else:
-                print("Slot data verification skipped (no Retrieved packet received).", file=sys.stderr)
-
-            ws.close()
-
-        # Re-open connection for item grants
-        ws = create_connection(ws_url)
-        ws.send(json.dumps(connect_msg))
-        start_time = time.time()
-        ws.settimeout(0.5)
-        while time.time() - start_time < 1:
-            try:
-                ws.recv()
-            except Exception:
-                continue
-
-        # 5. Give the player all the items they currently have via !getitem
-        for item_name in item_names:
-            ws.send(json.dumps([{"cmd": "Say", "text": f"!getitem {item_name}"}]))
-
-        # Wait for item grants to be processed server-side
-        time.sleep(1)
-        ws.close()
-
-    except Exception as e:
-        print(f"WebSocket Error: {e}", file=sys.stderr)
-        host_proc.terminate()
-        sys.exit(1)
-
-    # 6. Run Universal Tracker in --list mode to get in-logic locations
-    print(f"--- Running Universal Tracker for {args.name} ---")
     tracker_result = subprocess.run(
         [
-            "xvfb-run", "-a", "-s", "-screen 0 1024x768x24",
+            # "xvfb-run", "-a", "-s", "-screen 0 1024x768x24",
             launcher_path, "Universal Tracker", "--",
             "--name", args.name,
             "--list",
@@ -232,25 +119,17 @@ def main():
     print(tracker_result.stdout)
     print('--- tracker stderr ---')
     print(tracker_result.stderr)
-    print('---  ---')
 
-    # 7. Filter UT's stdout: any line whose content exactly matches a known
-    #    location name is in logic
-    location_names = [l.split('(')[0].strip() for l in location_names]
+    # Keep lines whose pre-paren text matches a known location name;
+    # emit the full name including parentheses (helpful context for the player)
     in_logic = [
-        line.split('(')[0].strip() for line in tracker_result.stdout.splitlines()
-        if line.split('(')[0].strip() in location_names
+        line.strip() for line in tracker_result.stdout.splitlines()
+        if line.split('(')[0].strip() in stripped_location_names
     ]
 
     print("In logic list:")
     for loc in in_logic:
         print(loc)
-
-    # if tracker_result.stderr:
-    #     print("Tracker Errors:", tracker_result.stderr, file=sys.stderr)
-
-    host_proc.terminate()
-    # print("--- Done ---")
 
 
 if __name__ == "__main__":

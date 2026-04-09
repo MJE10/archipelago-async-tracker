@@ -6,7 +6,8 @@ import json
 # --- CONFIGURATION ---
 LISTEN_HOST = "localhost"
 LISTEN_PORT = 8765
-TARGET_URL = "wss://archipelago.gg:39663"  # Change this to your destination URL
+# TARGET_URL = "wss://archipelago.gg:59247"  # Change this to your destination URL
+TARGET_URL = "ws://localhost:55555"  # Change this to your destination URL
 # ---------------------
 
 async def forward(source, destination, direction_label):
@@ -16,12 +17,12 @@ async def forward(source, destination, direction_label):
             # Print the content of the message
             content = json.loads(message)
             for cmd in content:
-                print(f"[{direction_label}]: {json.dumps(cmd)}")
+                print(f"[{direction_label}]: {json.dumps(cmd)[:1000]}")
 
-            if json.loads(message)[0]["cmd"] != "Bounce":
+            # if json.loads(message)[0]["cmd"] != "Bounce":
             
-                # Forward the message to the other side
-                await destination.send(message)
+            # Forward the message to the other side
+            await destination.send(message)
     except websockets.exceptions.ConnectionClosed:
         pass
 

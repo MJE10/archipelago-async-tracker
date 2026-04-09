@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # websocket-client needed by in_container.py
-RUN pip3 install websocket-client --break-system-packages
+RUN pip3 install websocket-client websockets --break-system-packages
 
 # Download and extract official Archipelago 0.6.6 binary release
 RUN curl -L https://github.com/ArchipelagoMW/Archipelago/releases/download/0.6.7/Archipelago_0.6.7_linux-x86_64.tar.gz \
