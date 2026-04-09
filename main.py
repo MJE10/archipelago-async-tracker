@@ -4,7 +4,7 @@ from util import *
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, jsonify, send_from_directory, request
-from notifications import get_active_subscriptions, update_subscriptions, check_and_notify
+from extra.notifications import get_active_subscriptions, update_subscriptions, check_and_notify
 
 app = Flask(__name__, static_folder='static')
 app.json.sort_keys = False

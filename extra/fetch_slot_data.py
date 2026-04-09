@@ -12,6 +12,10 @@ import json
 import yaml
 import sys
 from websocket import create_connection
+
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from util import (
     api_path, room_id, room_status, player_name_to_idx, redis_key_for,
     set_redis_prefix, register_prop_defaults, game_prop,
