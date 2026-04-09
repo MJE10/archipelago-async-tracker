@@ -266,7 +266,11 @@
                 }
             }
             if (allPlayerRows.length > 0) {
-                allPlayerRows.sort((a, b) => a.playerName.localeCompare(b.playerName));
+                allPlayerRows.sort((a, b) => {
+                    const gameCompare = a.gameName.localeCompare(b.gameName);
+                    return gameCompare !== 0 ? gameCompare : a.playerName.localeCompare(b.playerName);
+                });
+                const multipleGames = new Set(allPlayerRows.map(r => r.gameName)).size > 1;
                 const summaryEl = document.createElement('div');
                 summaryEl.className = 'card rounded-xl overflow-hidden mb-4';
                 summaryEl.innerHTML = `
@@ -274,6 +278,7 @@
                         <thead>
                             <tr class="bg-white/5 border-b border-white/5">
                                 <th class="text-right f-10 font-bold uppercase tracking-widest text-gray-500 px-3 py-2 w-10">Chk</th>
+                                ${multipleGames ? '<th class="text-left f-10 font-bold uppercase tracking-widest text-gray-500 px-3 py-2 w-28">Game</th>' : ''}
                                 <th class="text-left f-10 font-bold uppercase tracking-widest text-gray-500 px-3 py-2 w-28">Player</th>
                                 <th class="f-10 font-bold uppercase tracking-widest text-gray-500 px-3 py-2">Progress</th>
                                 <th class="text-right f-10 font-bold uppercase tracking-widest text-gray-500 px-3 py-2 w-10">Tot</th>
@@ -288,6 +293,7 @@
                                     <td class="text-right px-3 py-1.5 w-10">
                                         <span class="f-12 font-black font-mono ${row.count > 0 ? 'text-yellow-400' : 'text-gray-700'}">${row.count}</span>
                                     </td>
+                                    ${multipleGames ? `<td class="f-12 px-3 py-1.5 w-28 text-gray-500">${row.gameName}</td>` : ''}
                                     <td class="f-12 font-bold px-3 py-1.5 w-28"><a href="#" class="text-blue-400 hover:text-blue-300 transition-colors" onclick="event.preventDefault(); scrollToPlayer('${row.gameName}', '${row.playerName}')">${row.playerName}</a></td>
                                     <td class="px-3 py-1.5">
                                         <div class="w-full h-2 bg-black/40 rounded-full flex overflow-hidden border border-white/5">
