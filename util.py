@@ -182,9 +182,9 @@ def calculate_player_logic(game, player_name, player_data, rid):
 
     # 4. Check if this exact state is already cached
     cached_logic = r.get(new_redis_key)
-    # if cached_logic:
-    #     print(f"CACHED logic for {game['name']}/{player_name}")
-    #     return (player_name, json.loads(cached_logic))
+    if cached_logic:
+        print(f"CACHED logic for {game['name']}/{player_name}")
+        return (player_name, json.loads(cached_logic))
 
     # 5. Calculate logic (expensive — runs Docker)
     path = Path(os.path.join("games", game["name"]))

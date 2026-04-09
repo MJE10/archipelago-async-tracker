@@ -68,7 +68,7 @@ def fetch_for_player(game, player_name, player_index, port, host, protocol, pass
         return False
 
     slot_data = connected_packet.get("slot_data", {})
-    print(f"slot_data for '{player_name}': {json.dumps(slot_data, indent=2)}")
+    # print(f"slot_data for '{player_name}': {json.dumps(slot_data, indent=2)}")
 
     # Store the full Connected packet
     connected_key = redis_key_for(game, f"connected:{player_name}")
@@ -98,7 +98,7 @@ def fetch_for_player(game, player_name, player_index, port, host, protocol, pass
         extra_items_key = redis_key_for(game, "extra_items")
         items = received_items_packet.get("items", [])
         for ni in items:
-            field = f"{ni['player']}_{ni['location']}"
+            field = f"{ni['player']}_{ni['location']}_{ni['item']}"
             value = json.dumps({"player": player_name, "item": ni})
             r.hset(extra_items_key, field, value)
         print(f"Stored {len(items)} extra item(s) for '{player_name}' in Redis key '{extra_items_key}'.")
