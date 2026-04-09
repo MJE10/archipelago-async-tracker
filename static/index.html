@@ -247,9 +247,9 @@
             const top = el.getBoundingClientRect().top + window.scrollY - stickyH - 16;
             window.scrollTo({ top, behavior: 'smooth' });
         }
-        function collapseAll() { document.querySelectorAll('[id^="g_"], [id^="p_"], #hints-panel').forEach(el => { el.classList.add('collapsed'); localStorage.setItem(STORAGE_PREFIX + el.id, 'true'); }); }
+        function collapseAll() { document.querySelectorAll('[id^="g_"], [id^="p_"], #hints-panel, [id^="hints-player-"]').forEach(el => { el.classList.add('collapsed'); localStorage.setItem(STORAGE_PREFIX + el.id, 'true'); }); }
         function toggleCollapse(id) { const element = document.getElementById(id); const isCollapsed = element.classList.toggle('collapsed'); localStorage.setItem(STORAGE_PREFIX + id, isCollapsed); }
-        function isCollapsed(id) { const stored = localStorage.getItem(STORAGE_PREFIX + id); return stored === null ? false : stored === 'true'; }
+        function isCollapsed(id) { const stored = localStorage.getItem(STORAGE_PREFIX + id); return stored === null ? true : stored === 'true'; }
         function matchesSearch(text) { if (!SEARCH_QUERY) return true; return SEARCH_QUERY.split(/\s+/).every(word => text.toLowerCase().includes(word)); }
 
         function render() {
@@ -330,12 +330,50 @@
                 const priorityUnfound = allHints.filter(h => h.status === 'Priority' && !h.found).length;
                 const otherUnfound    = allHints.filter(h => h.status !== 'Priority' && !h.found).length;
                 const foundCount      = allHints.filter(h => h.found).length;
-                let visibleHints = allHints;
-                if (HINTS_HIDE_UNSPECIFIED) visibleHints = visibleHints.filter(h => h.status !== 'Unspecified');
-                if (HINTS_HIDE_FOUND)       visibleHints = visibleHints.filter(h => !h.found);
-                if (SEARCH_QUERY) visibleHints = visibleHints.filter(h =>
-                    matchesSearch([h.item, h.location, h.receiving_player, h.finding_player, h.entrance || '', h._game || ''].join(' '))
-                );
+
+                // Group hints by both receiving_player and finding_player
+                const hintsByPlayer = {};
+                for (const h of allHints) {
+                    const recv = h.receiving_player;
+                    const find = h.finding_player;
+                    if (!hintsByPlayer[recv]) hintsByPlayer[recv] = [];
+                    hintsByPlayer[recv].push({...h, _role: 'for'});
+                    if (find !== recv) {
+                        if (!hintsByPlayer[find]) hintsByPlayer[find] = [];
+                        hintsByPlayer[find].push({...h, _role: 'from'});
+                    }
+                }
+
+                // Build per-player sub-sections
+                const playerSections = Object.entries(hintsByPlayer).map(([playerName, hints]) => {
+                    let visible = hints;
+                    if (HINTS_HIDE_UNSPECIFIED) visible = visible.filter(h => h.status !== 'Unspecified');
+                    if (HINTS_HIDE_FOUND)       visible = visible.filter(h => !h.found);
+                    if (SEARCH_QUERY) visible = visible.filter(h =>
+                        matchesSearch([h.item, h.location, h.receiving_player, h.finding_player, h.entrance || '', h._game || ''].join(' '))
+                    );
+                    if (visible.length === 0 && (HINTS_HIDE_UNSPECIFIED || HINTS_HIDE_FOUND || SEARCH_QUERY)) return '';
+                    const forYouCount = visible.filter(h => h._role === 'for').length;
+                    const toFindCount = visible.filter(h => h._role === 'from').length;
+                    const panelId = `hints-player-${btoa(playerName).replace(/[^a-z0-9]/gi, '')}`;
+                    return `
+                        <div id="${panelId}" class="${isCollapsed(panelId) ? 'collapsed' : ''}">
+                            <div class="flex items-center gap-2 px-4 py-2.5 bg-white/[0.02] cursor-pointer hover:bg-white/[0.05] transition-all border-b border-white/5" onclick="toggleCollapse('${panelId}')">
+                                <svg class="rotate-icon w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                <span class="f-12 font-bold text-blue-300">${escAttr(playerName)}</span>
+                                <div class="flex items-center gap-1.5 ml-1">
+                                    ${forYouCount > 0 ? `<span class="f-10 px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 font-bold">${forYouCount} for you</span>` : ''}
+                                    ${toFindCount > 0 ? `<span class="f-10 px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 font-bold">${toFindCount} to find</span>` : ''}
+                                </div>
+                            </div>
+                            <div class="collapse-wrapper">
+                                <div class="collapse-inner px-4 py-3">
+                                    ${renderHints(visible, multiGame, true)}
+                                </div>
+                            </div>
+                        </div>`;
+                }).join('');
+
                 const hintsEl = document.createElement('div');
                 hintsEl.id = 'hints-panel';
                 hintsEl.className = `card rounded-2xl overflow-hidden mb-6 ${isCollapsed('hints-panel') ? 'collapsed' : ''}`;
@@ -360,8 +398,8 @@
                         </div>
                     </div>
                     <div class="collapse-wrapper">
-                        <div class="collapse-inner p-4 bg-black/40 border-t border-white/5">
-                            ${renderHints(visibleHints, multiGame)}
+                        <div class="collapse-inner bg-black/40 border-t border-white/5 divide-y divide-white/5">
+                            ${playerSections}
                         </div>
                     </div>`;
                 container.appendChild(hintsEl);
@@ -541,44 +579,62 @@
             'Unspecified': 'bg-gray-500/15   text-gray-500   border-gray-500/20',
         };
 
-        // hints: flat array of hint objects (each may have _game set for multi-game display)
-        // showGame: render a "Game" column
-        function renderHints(hints, showGame = false) {
+        // hints: flat array of hint objects (each may have _game/_role set)
+        // showGame: render a "Game" column; showRole: render a "Role" column
+        function renderHints(hints, showGame = false, showRole = false) {
             if (!hints || hints.length === 0) return '';
             const rows = hints.map(h => {
                 const statusCls = HINT_STATUS_STYLES[h.status] || HINT_STATUS_STYLES['Unspecified'];
                 const progressionStar = (h.item_flags & 0b001) ? '<span class="text-yellow-400 ml-1" title="Progression item">★</span>' : '';
                 const usefulDiamond  = (h.item_flags & 0b010) ? '<span class="text-purple-400 ml-1" title="Useful item">◆</span>'       : '';
                 const gameCell = showGame ? `<td class="px-3 py-2 f-10 text-gray-600 font-mono whitespace-nowrap">${escAttr(h._game || '')}</td>` : '';
+                let playerCells, playerCells2, playerHeaders;
+                if (showRole) {
+                    const otherPlayer = h._role === 'for' ? h.finding_player : h.receiving_player;
+                    const label = h._role === 'for' ? 'by' : 'for';
+                    const roleBadge = h._role === 'for'
+                        ? '<span class="f-10 px-1.5 py-0.5 rounded border font-bold uppercase tracking-wider bg-blue-500/15 text-blue-400 border-blue-500/20">for you</span>'
+                        : '<span class="f-10 px-1.5 py-0.5 rounded border font-bold uppercase tracking-wider bg-purple-500/15 text-purple-400 border-purple-500/20">to find</span>';
+                    playerCells = `<td class="px-3 py-2 f-12 text-gray-300 whitespace-nowrap"><span class="f-10 text-gray-600 mr-1">${label}</span>${escAttr(otherPlayer)}</td>`;
+                    playerCells2 = `<td class="px-3 py-2 whitespace-nowrap">${roleBadge}</td>`;
+                } else {
+                    playerCells = `<td class="px-3 py-2 f-12 font-bold text-blue-400 whitespace-nowrap">${escAttr(h.receiving_player)}</td><td class="px-3 py-2 f-12 text-gray-500 whitespace-nowrap">${escAttr(h.finding_player)}</td>`;
+                }
                 return `
                 <tr class="border-b border-white/5 last:border-0 hover:bg-white/[0.03] transition-colors ${h.found ? 'opacity-40' : ''}">
                     <td class="px-3 py-2 whitespace-nowrap">
                         <span class="inline-flex items-center px-2 py-0.5 rounded f-10 font-bold border uppercase tracking-wider ${statusCls}">${h.status}</span>
                     </td>
+                    ${playerCells2}
                     ${gameCell}
                     <td class="px-3 py-2">
                         ${progressionStar}${usefulDiamond}<span class="f-12 font-bold text-gray-200"> ${h.item}</span>
                     </td>
-                    <td class="px-3 py-2 f-12 font-bold text-blue-400 whitespace-nowrap">${h.receiving_player}</td>
                     <td class="px-3 py-2">
                         <span class="f-12 text-gray-400">${h.location}</span>
                         ${h.entrance ? `<div class="f-10 text-gray-600 font-mono mt-0.5 truncate max-w-[220px]" title="${escAttr(h.entrance)}">↳ ${h.entrance}</div>` : ''}
                     </td>
-                    <td class="px-3 py-2 f-12 text-gray-500 whitespace-nowrap">${h.finding_player}</td>
+                    ${playerCells}
                 </tr>`;
             }).join('');
             const gameHeader = showGame ? '<th class="text-left f-10 font-bold uppercase tracking-widest text-gray-600 px-3 py-2 whitespace-nowrap">Game</th>' : '';
+            const playerHeaderHtml = showRole
+                ? '<th class="text-left f-10 font-bold uppercase tracking-widest text-gray-600 px-3 py-2 whitespace-nowrap">Other</th>'
+                : '<th class="text-left f-10 font-bold uppercase tracking-widest text-gray-600 px-3 py-2 whitespace-nowrap">By</th>';
+            const playerHeaderHtml2 = showRole
+                ? '<th class="text-left f-10 font-bold uppercase tracking-widest text-gray-600 px-3 py-2 whitespace-nowrap">Role</th>'
+                : '<th class="text-left f-10 font-bold uppercase tracking-widest text-gray-600 px-3 py-2 whitespace-nowrap">For</th>';
             return `
             <div class="overflow-x-auto rounded-lg border border-white/5">
                 <table class="w-full border-collapse">
                     <thead>
                         <tr class="bg-white/5 border-b border-white/5">
                             <th class="text-left f-10 font-bold uppercase tracking-widest text-gray-600 px-3 py-2 whitespace-nowrap">Status</th>
+                            ${playerHeaderHtml2}
                             ${gameHeader}
                             <th class="text-left f-10 font-bold uppercase tracking-widest text-gray-600 px-3 py-2">Item</th>
-                            <th class="text-left f-10 font-bold uppercase tracking-widest text-gray-600 px-3 py-2 whitespace-nowrap">For</th>
                             <th class="text-left f-10 font-bold uppercase tracking-widest text-gray-600 px-3 py-2">Location</th>
-                            <th class="text-left f-10 font-bold uppercase tracking-widest text-gray-600 px-3 py-2 whitespace-nowrap">By</th>
+                            ${playerHeaderHtml}
                         </tr>
                     </thead>
                     <tbody>${rows}</tbody>
