@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Logic Tracker</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/regular/style.css">
     <style>
@@ -768,8 +769,21 @@
             document.getElementById('log-modal').classList.add('hidden');
         }
 
+        const socket = io();
+
+        socket.on('connect', () => { LAST_FETCH_ERROR = false; });
+        socket.on('disconnect', () => { LAST_FETCH_ERROR = true; render(); });
+        socket.on('game_update', (data) => {
+            Object.assign(CURRENT_DATA, data);
+            LAST_RECEIVED_AT = new Date();
+            LAST_FETCH_ERROR = false;
+            render();
+        });
+
+        // Initial REST load as fallback if socket connects before server has first results
         fetchData();
-        setInterval(fetchData, 60000);
+        // Keep notifications polling
+        setInterval(() => fetch('/notifications').then(r => r.json()).then(d => { NOTIF_STATE = d; }), 60000);
 
         // Back to top button
         window.addEventListener('scroll', () => {

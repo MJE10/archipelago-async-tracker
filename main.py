@@ -4,10 +4,12 @@ from util import *
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, jsonify, send_from_directory, request
+from flask_socketio import SocketIO
 from extra.notifications import get_active_subscriptions, update_subscriptions, check_and_notify
 
 app = Flask(__name__, static_folder='static')
 app.json.sort_keys = False
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 GAMES_YAML = "games.yaml"
 
@@ -15,6 +17,9 @@ ALL_GAME_RESULTS = {}
 REFRESH_TRACKERS = []
 REFRESH_ALL = False
 SUPER_REFRESH = []
+REFRESH_NOW = threading.Event()
+PENDING_LISTENER_REFRESH = set()
+PENDING_LISTENER_REFRESH_LOCK = threading.Lock()
 
 @app.route('/')
 def index():
@@ -31,6 +36,11 @@ def get_games():
     global ALL_GAME_RESULTS
     """Returns the current state of ALL_GAME_RESULTS as JSON."""
     return jsonify(ALL_GAME_RESULTS)
+
+@socketio.on('connect')
+def handle_ws_connect():
+    from flask_socketio import emit
+    emit('game_update', ALL_GAME_RESULTS)
 
 @app.route('/logic_log')
 def get_logic_log():
@@ -115,10 +125,16 @@ def background_update_loop():
         update_all_games()
         # except Exception as e:
         #     print(f"Error in update loop: {e}")
-        time.sleep(30)
+        REFRESH_NOW.wait(timeout=30)
+        REFRESH_NOW.clear()
 
 def update_all_games():
     global ALL_GAME_RESULTS, REFRESH_TRACKERS, SUPER_REFRESH, REFRESH_ALL
+    with PENDING_LISTENER_REFRESH_LOCK:
+        for name in PENDING_LISTENER_REFRESH:
+            if name not in REFRESH_TRACKERS:
+                REFRESH_TRACKERS.append(name)
+        PENDING_LISTENER_REFRESH.clear()
     with open(GAMES_YAML, 'r') as f:
         games = yaml.load(f, Loader=yaml.SafeLoader)
 
@@ -176,6 +192,7 @@ def update_all_games():
             all_results[name]["players"] = per_player
             all_results[name]["game_checks_done"] = game_checks_done
             all_results[name]["game_checks_total"] = game_checks_total
+            socketio.emit('game_update', {name: all_results[name]})
 
     for (name, game, _) in games_to_process:
         all_results[name]["tracker_fetched_at"] = get_tracker_fetched_at(game)
@@ -291,6 +308,19 @@ def process_game(name, game, memory):
                             gui = per_player[player_name].setdefault("items", {})
                             gui[item_name] = gui.get(item_name, 0) + 1
 
+    # Mark source locations from extra_items as checked for the sending player.
+    # The tracker data may not yet reflect these checks, but extra_items tells
+    # us they happened, so the logic calculator should treat them as done.
+    if extra_items_hash:
+        for val_str in extra_items_hash.values():
+            ni = json.loads(val_str)["item"]
+            if ni["location"] < 0 or ni["player"] <= 0:
+                continue  # skip special locations / server-generated items
+            sender_name = player_idx_to_name(game, ni["player"] - 1)
+            if sender_name in interesting_players:
+                if ni["location"] not in interesting_players[sender_name]["checks_done"]:
+                    interesting_players[sender_name]["checks_done"].append(ni["location"])
+
     # Determine things that are in logic
     in_logic = calculate_trackers(game, interesting_players)
     for player_name in in_logic:
@@ -327,7 +357,22 @@ if __name__ == "__main__":
     redis_prefix = defaults.get("redis_prefix", "ap2")
     set_redis_prefix(redis_prefix)
 
+    from extra.listener import run_listener
+    for game_name, game in config.items():
+        if game_name == "default" or not game or "link" not in game:
+            continue
+        game = dict(game)
+        game["name"] = game_name
+        if game_prop(game, "global_listener"):
+            t = threading.Thread(
+                target=run_listener,
+                args=(game, game_name, PENDING_LISTENER_REFRESH, PENDING_LISTENER_REFRESH_LOCK, REFRESH_NOW),
+                daemon=True
+            )
+            t.start()
+            print(f"Started listener thread for {game_name}")
+
     update_thread = threading.Thread(target=background_update_loop, daemon=True)
     update_thread.start()
 
-    app.run(host='0.0.0.0', port=port)
+    socketio.run(app, host='0.0.0.0', port=port)
