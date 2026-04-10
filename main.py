@@ -1,5 +1,6 @@
 import yaml
 import argparse
+import traceback
 from util import *
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -121,10 +122,16 @@ def trigger_super_refresh(game_name):
 def background_update_loop():
     """Runs the infinite loop in a separate thread."""
     while True:
-        # try:
-        update_all_games()
-        # except Exception as e:
-        #     print(f"Error in update loop: {e}")
+        if global_prop("debug"):
+            update_all_games()
+        else:
+            try:
+                update_all_games()
+            except Exception as e:
+                tb = traceback.format_exc()
+                msg = f"background_update_loop crash: {e}\n{tb}"
+                print(msg)
+                log_error_to_redis(msg)
         REFRESH_NOW.wait(timeout=30)
         REFRESH_NOW.clear()
 

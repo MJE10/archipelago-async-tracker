@@ -48,6 +48,7 @@ def run_listener(game, game_name, pending_set, pending_lock, refresh_event):
 
         except Exception as e:
             print(f"[listener:{game_name}] Disconnected: {e}, reconnecting in 10s...")
+            r.delete(redis_key_for(game, "room_status"))
             time.sleep(10)
 
 

@@ -262,9 +262,17 @@
             // --- Player check summary table ---
             const allPlayerRows = [];
             for (const [gameName, gameData] of Object.entries(CURRENT_DATA)) {
+                const hints = gameData.hints || [];
                 for (const [playerName, pData] of Object.entries(gameData.players || {})) {
                     if (pData.in_logic !== undefined) {
-                        allPlayerRows.push({ gameName, playerName, pData, count: pData.in_logic.length });
+                        const inLogicSet = new Set(pData.in_logic);
+                        const hasPriorityInLogic = hints.some(h =>
+                            h.finding_player === playerName &&
+                            h.status === 'Priority' &&
+                            !h.found &&
+                            inLogicSet.has(h.location)
+                        );
+                        allPlayerRows.push({ gameName, playerName, pData, count: pData.in_logic.length, hasPriorityInLogic });
                     }
                 }
             }
@@ -297,7 +305,10 @@
                                         <span class="f-12 font-black font-mono ${row.count > 0 ? 'text-yellow-400' : 'text-gray-700'}">${row.count}</span>
                                     </td>
                                     ${multipleGames ? `<td class="f-12 px-3 py-1.5 w-28 text-gray-500">${row.gameName}</td>` : ''}
-                                    <td class="f-12 font-bold px-3 py-1.5 w-28"><a href="#" class="text-blue-400 hover:text-blue-300 transition-colors" onclick="event.preventDefault(); scrollToPlayer('${row.gameName}', '${row.playerName}')">${row.playerName}</a></td>
+                                    <td class="f-12 font-bold px-3 py-1.5 w-28 whitespace-nowrap">
+                                        ${row.hasPriorityInLogic ? '<span class="mr-1 text-orange-400 animate-pulse" title="Priority hint in logic!">★</span>' : ''}
+                                        <a href="#" class="text-blue-400 hover:text-blue-300 transition-colors" onclick="event.preventDefault(); scrollToPlayer('${row.gameName}', '${row.playerName}')">${row.playerName}</a>
+                                    </td>
                                     <td class="px-3 py-1.5">
                                         <div class="w-full h-2 bg-black/40 rounded-full flex overflow-hidden border border-white/5">
                                             <div class="h-full shadow-[0_0_10px_rgba(34,197,94,0.4)]" style="width: ${donePct}%; background: linear-gradient(to right, #013614, #02f75c); background-size: ${donePct > 0 ? (10000/donePct).toFixed(1) : 100}% 100%"></div>
@@ -319,6 +330,11 @@
             const STATUS_SORT_ORDER = { 'Priority': 0, 'Unspecified': 1, 'No Priority': 2, 'Avoid': 3, 'Found': 4 };
             const gamesWithHints = Object.keys(CURRENT_DATA).filter(n => CURRENT_DATA[n].hints?.length > 0);
             const multiGame = gamesWithHints.length > 1;
+            // Collect the set of players actually shown in the UI (filtered by game config)
+            const uiPlayers = new Set();
+            for (const gameName of gamesWithHints) {
+                for (const p of Object.keys(CURRENT_DATA[gameName].players || {})) uiPlayers.add(p);
+            }
             const allHints = [];
             for (const gameName of gamesWithHints) {
                 for (const h of CURRENT_DATA[gameName].hints) {
@@ -326,19 +342,22 @@
                 }
             }
             allHints.sort((a, b) => (STATUS_SORT_ORDER[a.status] ?? 99) - (STATUS_SORT_ORDER[b.status] ?? 99));
-            if (allHints.length > 0) {
-                const priorityUnfound = allHints.filter(h => h.status === 'Priority' && !h.found).length;
-                const otherUnfound    = allHints.filter(h => h.status !== 'Priority' && !h.found).length;
-                const foundCount      = allHints.filter(h => h.found).length;
+            const relevantHints = allHints.filter(h => uiPlayers.has(h.receiving_player) || uiPlayers.has(h.finding_player));
+            if (relevantHints.length > 0) {
+                const priorityUnfound = relevantHints.filter(h => h.status === 'Priority' && !h.found).length;
+                const otherUnfound    = relevantHints.filter(h => h.status !== 'Priority' && !h.found).length;
+                const foundCount      = relevantHints.filter(h => h.found).length;
 
-                // Group hints by both receiving_player and finding_player
+                // Group hints by both receiving_player and finding_player, restricted to UI-visible players
                 const hintsByPlayer = {};
                 for (const h of allHints) {
                     const recv = h.receiving_player;
                     const find = h.finding_player;
-                    if (!hintsByPlayer[recv]) hintsByPlayer[recv] = [];
-                    hintsByPlayer[recv].push({...h, _role: 'for'});
-                    if (find !== recv) {
+                    if (uiPlayers.has(recv)) {
+                        if (!hintsByPlayer[recv]) hintsByPlayer[recv] = [];
+                        hintsByPlayer[recv].push({...h, _role: 'for'});
+                    }
+                    if (find !== recv && uiPlayers.has(find)) {
                         if (!hintsByPlayer[find]) hintsByPlayer[find] = [];
                         hintsByPlayer[find].push({...h, _role: 'from'});
                     }
@@ -492,6 +511,11 @@
                 const playerLink = pData.ut_link || "#";
                 const notifOn = hasNotification(gameName, playerName);
                 
+                const priorityHintLocs = new Set(
+                    (CURRENT_DATA[gameName]?.hints || [])
+                        .filter(h => h.finding_player === playerName && h.status === 'Priority' && !h.found)
+                        .map(h => h.location)
+                );
                 const filteredLocs = (pData.in_logic || []).filter(loc => matchesSearch(loc));
                 const sortedItems = Object.entries(pData.items || {})
                     .filter(([name]) => matchesSearch(name))
@@ -549,7 +573,13 @@
                                 <div class="grid grid-cols-1 md:grid-cols-2">
                                     <div class="${activeTab === 'locations' ? 'block' : 'hidden md:block'} p-4 border-b md:border-b-0 md:border-r border-white/5">
                                         <div class="grid grid-cols-1 gap-2">
-                                            ${filteredLocs.map(l => `<div class="f-12 text-gray-400 truncate hover:text-yellow-400 transition-colors flex items-center gap-2"><span class="w-1.5 h-1.5 bg-yellow-500 rounded-full shadow-[0_0_5px_rgba(234,179,8,0.5)]"></span>${l}</div>`).join('') || '<div class="text-gray-700 f-12 italic">Nothing currently reachable.</div>'}
+                                            ${filteredLocs.map(l => {
+                                                const isPriority = priorityHintLocs.has(l);
+                                                return `<div class="f-12 truncate transition-colors flex items-center gap-2 ${isPriority ? 'text-orange-300 font-bold hover:text-orange-200' : 'text-gray-400 hover:text-yellow-400'}">
+                                                    ${isPriority ? '<span class="text-orange-400 animate-pulse shrink-0" title="Priority hint here!">★</span>' : '<span class="w-1.5 h-1.5 bg-yellow-500 rounded-full shadow-[0_0_5px_rgba(234,179,8,0.5)] shrink-0"></span>'}
+                                                    ${l}
+                                                </div>`;
+                                            }).join('') || '<div class="text-gray-700 f-12 italic">Nothing currently reachable.</div>'}
                                         </div>
                                     </div>
                                     <div class="${activeTab === 'items' ? 'block' : 'hidden md:block'} p-4 bg-white/5">

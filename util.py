@@ -39,6 +39,15 @@ def register_prop_defaults(props):
     global PROPS_DEFAULTS
     PROPS_DEFAULTS = props
 
+def global_prop(prop):
+    return PROPS_DEFAULTS.get(prop)
+
+def log_error_to_redis(error_text):
+    key = f"{REDIS_PREFIX}:errors"
+    entry = json.dumps({"error": error_text, "at": datetime.now(timezone.utc).isoformat()})
+    r.lpush(key, entry)
+    r.ltrim(key, 0, 99)  # Keep last 100 errors
+
 def game_prop(game, prop):
     if prop in game:
         return game[prop]
